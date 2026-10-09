@@ -161,6 +161,40 @@ if not CFG.get("catastro"):
                 add_osm_building(way_pts(ways[m["ref"]]), r["tags"])
     print("edificios OSM:", len(buildings))
 
+# ---------------- alturas reales con LiDAR (MDS - MDT) ----------------
+mds_p = os.path.join(D, "mds1.tif")
+if os.path.exists(mds_p):
+    from PIL import ImageDraw as _ID
+    mds = tifffile.imread(mds_p).astype(np.float32)
+    if mds.ndim == 3: mds = mds[..., 0]
+    N = mds.shape[0]; res = 2 * HALF / N
+    mds[(mds < -100) | (mds > 5000)] = np.nan
+    print("MDS", mds.shape, np.nanmin(mds), np.nanmax(mds))
+    done = 0
+    for b in buildings:
+        poly = [((q[0] + HALF) / res, (q[1] + HALF) / res) for q in b["p"]]
+        ci0 = max(0, int(min(p[0] for p in poly)) - 1); cj0 = max(0, int(min(p[1] for p in poly)) - 1)
+        ci1 = min(N, int(max(p[0] for p in poly)) + 2); cj1 = min(N, int(max(p[1] for p in poly)) + 2)
+        if ci1 - ci0 < 2 or cj1 - cj0 < 2: continue
+        img = Image.new("L", (ci1 - ci0, cj1 - cj0), 0)
+        _ID.Draw(img).polygon([(x - ci0, y - cj0) for x, y in poly], fill=1)
+        m = np.asarray(img).astype(bool)
+        sub = mds[cj0:cj1, ci0:ci1]
+        # erosión de 1 px para no coger el suelo del borde
+        e = m.copy(); e[1:, :] &= m[:-1, :]; e[:-1, :] &= m[1:, :]; e[:, 1:] &= m[:, :-1]; e[:, :-1] &= m[:, 1:]
+        v = sub[e if e.sum() >= 6 else m]; v = v[~np.isnan(v)]
+        if len(v) < 4: continue
+        p95, p50, p20 = np.percentile(v, 95), np.percentile(v, 50), np.percentile(v, 20)
+        gnd = min(H(q[0], q[1]) for q in b["p"]) + y0
+        if p95 - gnd < 2: continue  # derribado o mal casado
+        b["top"] = round(float(p95 - y0), 2)
+        flat_roof = (p95 - p20) < 1.3
+        b["flat"] = bool(flat_roof)
+        b["eave"] = round(float((p50 if flat_roof else p20) - y0), 2)
+        b["f"] = max(1, int(round((p50 - gnd) / 2.9)))
+        done += 1
+    print("alturas LiDAR:", done, "de", len(buildings))
+
 # ---------------- árboles a partir de la ortofoto ----------------
 img = np.asarray(Image.open(os.path.join(D, "ortho.jpg")).convert("RGB")).astype(np.float32)
 S = img.shape[0]; mpp = 2 * HALF / S
@@ -172,6 +206,14 @@ def box(a, r):
     c = np.cumsum(np.cumsum(np.pad(a, ((r + 1, r), (r + 1, r))), 0), 1)
     return (c[2 * r + 1:, 2 * r + 1:] - c[:-2 * r - 1, 2 * r + 1:] - c[2 * r + 1:, :-2 * r - 1] + c[:-2 * r - 1, :-2 * r - 1]) / (2 * r + 1) ** 2
 dens = box(mask.astype(np.float32), 2)
+if os.path.exists(mds_p):
+    # con LiDAR: árbol = superficie > 3 m sobre el suelo, verde en la ortofoto y fuera de edificios
+    from PIL import Image as _I
+    nd = np.asarray(_I.fromarray(np.nan_to_num(mds, nan=0)).resize((S, S), _I.BILINEAR))
+    gx = (np.arange(S) + 0.5) * mpp - HALF
+    tg = np.asarray(_I.fromarray(heights + y0).resize((S, S), _I.BILINEAR))
+    veg = ((nd - tg) > 3) & (G > R * 1.02) & (G > B * 1.05)
+    dens = box(veg.astype(np.float32), 2)
 
 # zonas sin árboles: edificios y vías
 from PIL import ImageDraw

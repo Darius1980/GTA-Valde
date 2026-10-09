@@ -121,8 +121,11 @@ class GeoBuilder {
 }
 
 // ---------- edificios ----------
+// style 'rural': piedra y teja (Valde). style 'urban': bloques revocados con lonjas en planta baja (Beraun).
 export function buildBuildings(data, terrain, tex, colliders) {
-  const facade = new GeoBuilder(), plaster = new GeoBuilder(), stone = new GeoBuilder(), roof = new GeoBuilder(), eaves = new GeoBuilder();
+  const urban = data.style === 'urban';
+  const facade = new GeoBuilder(), plaster = new GeoBuilder(), stone = new GeoBuilder(), roof = new GeoBuilder(), eaves = new GeoBuilder(), flat = new GeoBuilder();
+  const urbanB = (tex.urban || []).map(() => new GeoBuilder()), groundB = (tex.urbanGround || []).map(() => new GeoBuilder());
   let seed = 1; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   for (const b of data.buildings) {
     let pts = b.p.slice(); if (signedArea(pts) > 0) pts.reverse(); // orden que deja la normal de los muros hacia fuera
@@ -130,65 +133,96 @@ export function buildBuildings(data, terrain, tex, colliders) {
     let base = Infinity, top = -Infinity;
     for (const p of pts) { const h = terrain.height(p[0], p[1]); base = Math.min(base, h); top = Math.max(top, h); }
     const floors = Math.max(1, b.f || 1);
-    const eave = top + (b.use === 'agr' ? 3.2 + 0.6 * rnd() : floors * 2.9 + 0.3);
+    const floorH = urban ? 2.85 : 2.9;
+    let eave = b.eave != null ? Math.max(b.eave, top + 2.4) : top + (b.use === 'agr' ? 3.2 + 0.6 * rnd() : floors * floorH + (urban ? 1.2 : 0.3));
     const y0 = base - 0.6;
     const ob = obb(pts); if (!ob) continue;
     const width = ob.mxv - ob.mnv, length = ob.mxu - ob.mnu;
-    // cumbrera a lo largo del lado largo; pendiente ~ 30 % (teja árabe)
     let rx = ob.ux, rz = ob.uz, mid = (ob.mnv + ob.mxv) / 2, half = width / 2;
-    if (width > length) { // el lado largo es v
-      rx = -ob.uz; rz = ob.ux; mid = (ob.mnu + ob.mxu) / 2; half = length / 2;
-    }
-    const nx = -rz, nz = rx; // normal de la cumbrera en planta
-    const slope = 0.32;
-    const roofY = (x, z) => eave + slope * (half - Math.abs(x * nx + z * nz - mid));
-    const kind = b.use === 'agr' ? stone : (rnd() < 0.3 ? plaster : facade);
-    // cada casa con su tono: piedra más clara u oscura, teja más o menos envejecida
-    const t = 0.8 + rnd() * 0.3; facade.tint = plaster.tint = stone.tint = [t, t * (0.97 + rnd() * 0.05), t * (0.93 + rnd() * 0.07)];
+    if (width > length) { rx = -ob.uz; rz = ob.ux; mid = (ob.mnu + ob.mxu) / 2; half = length / 2; }
+    const nx = -rz, nz = rx;
+    const isFlat = b.flat === true;
+    let slope = 0.32;
+    if (b.top != null && !isFlat) slope = THREE.MathUtils.clamp((b.top - eave) / Math.max(1, half), 0.12, 0.42);
+    const roofY = isFlat ? () => eave : (x, z) => eave + slope * (half - Math.abs(x * nx + z * nz - mid));
+    // materiales de este edificio
+    let wallB, gB = null, tileW = 4, tileH = 3;
+    if (urban && b.use !== 'agr') {
+      const k = Math.floor(rnd() * urbanB.length); wallB = urbanB[k]; tileW = 3; tileH = floorH;
+      if (b.use !== 'ind' && floors >= 3) gB = groundB[Math.floor(rnd() * groundB.length)];
+    } else wallB = b.use === 'agr' ? stone : (rnd() < 0.3 ? plaster : facade);
+    const t = 0.82 + rnd() * 0.25;
+    for (const gb of [facade, plaster, stone, ...urbanB, ...groundB]) gb.tint = [t, t * (0.97 + rnd() * 0.05), t * (0.95 + rnd() * 0.05)];
     const age = rnd(); roof.tint = [0.75 + 0.3 * (1 - age), 0.72 + 0.25 * (1 - age) + 0.08 * age, 0.7 + 0.2 * age];
-    const tileW = 4, tileH = 3;
-    // muros
+    const gTop = top + 3.6; // planta baja (lonjas)
+    const parapet = isFlat ? 0.9 : 0;
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i], c = pts[(i + 1) % pts.length];
       const L = Math.hypot(c[0] - a[0], c[1] - a[1]); if (L < 0.05) continue;
-      const nTiles = kind === stone ? L / tileW : Math.max(1, Math.round(L / tileW));
+      const nTiles = wallB === stone ? L / tileW : Math.max(1, Math.round(L / tileW));
       const uScale = nTiles / L;
-      // el muro sube hasta el alero; si cruza la cumbrera se parte en dos para el piñón
       const da = a[0] * nx + a[1] * nz - mid, dc = c[0] * nx + c[1] * nz - mid;
       const segs = [[a, 0], [c, L]];
-      if (da * dc < 0) { const t = da / (da - dc); segs.splice(1, 0, [[a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t], L * t]); }
+      if (!isFlat && da * dc < 0) { const tt = da / (da - dc); segs.splice(1, 0, [[a[0] + (c[0] - a[0]) * tt, a[1] + (c[1] - a[1]) * tt], L * tt]); }
       for (let s = 0; s < segs.length - 1; s++) {
         const [p, lp] = segs[s], [q, lq] = segs[s + 1];
-        const vTop = (eave - y0) / tileH;
-        // parte rectangular hasta el alero
-        kind.quad([p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], eave, q[1]], [p[0], eave, p[1]],
-          [lp * uScale, 0], [lq * uScale, 0], [lq * uScale, vTop], [lp * uScale, vTop]);
-        // piñón (triángulo/trapecio hasta el tejado)
+        const wTop = eave + parapet;
+        if (gB && gTop < wTop - 2) {
+          // planta baja con su textura; encima, las plantas de viviendas alineadas desde arriba
+          const gu = Math.max(1, Math.round(L / 4)) / L;
+          const gBot = gTop - 3.6;
+          gB.quad([p[0], gBot, p[1]], [q[0], gBot, q[1]], [q[0], gTop, q[1]], [p[0], gTop, p[1]],
+            [lp * gu, 0], [lq * gu, 0], [lq * gu, 1], [lp * gu, 1]);
+          if (gBot > y0) // zócalo liso donde la calle baja en pendiente
+            gB.quad([p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], gBot, q[1]], [p[0], gBot, p[1]], [0.01, 0.9], [0.06, 0.9], [0.06, 0.95], [0.01, 0.95]);
+          const v0 = (gTop - wTop) / tileH;
+          wallB.quad([p[0], gTop, p[1]], [q[0], gTop, q[1]], [q[0], wTop, q[1]], [p[0], wTop, p[1]],
+            [lp * uScale, v0], [lq * uScale, v0], [lq * uScale, 0], [lp * uScale, 0]);
+        } else {
+          const vTop = (wTop - y0) / tileH;
+          wallB.quad([p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], wTop, q[1]], [p[0], wTop, p[1]],
+            [lp * uScale, 0], [lq * uScale, 0], [lq * uScale, vTop], [lp * uScale, vTop]);
+        }
+        if (isFlat) { // cara interior del peto
+          flat.quad([q[0], eave, q[1]], [p[0], eave, p[1]], [p[0], wTop, p[1]], [q[0], wTop, q[1]], [0, 0], [L / 3, 0], [L / 3, 0.3], [0, 0.3]);
+          flat.quad([p[0], wTop, p[1]], [q[0], wTop, q[1]], [q[0], wTop, q[1]], [p[0], wTop, p[1]], [0, 0], [0, 0], [0, 0], [0, 0]);
+          continue;
+        }
         const hp = roofY(p[0], p[1]), hq = roofY(q[0], q[1]);
-        if (hp - eave > 0.05 || hq - eave > 0.05)
-          stone.quad([p[0], eave, p[1]], [q[0], eave, q[1]], [q[0], hq, q[1]], [p[0], hp, p[1]],
-            [lp / 4, vTop], [lq / 4, vTop], [lq / 4, vTop + (hq - eave) / tileH], [lp / 4, vTop + (hp - eave) / tileH]);
+        const gable = urban ? wallB : stone;
+        if (hp - eave > 0.05 || hq - eave > 0.05) {
+          if (urban) gable.quad([p[0], eave, p[1]], [q[0], eave, q[1]], [q[0], hq, q[1]], [p[0], hp, p[1]],
+            [0.02, 0.02], [0.03, 0.02], [0.03, 0.03], [0.02, 0.03]); // revoco liso (esquina sin ventana)
+          else gable.quad([p[0], eave, p[1]], [q[0], eave, q[1]], [q[0], hq, q[1]], [p[0], hp, p[1]],
+            [lp / 4, 0], [lq / 4, 0], [lq / 4, (hq - eave) / 3], [lp / 4, (hp - eave) / 3]);
+        }
       }
       colliders.addSegment(a[0], a[1], c[0], c[1], 'building');
     }
-    // tejado: se divide la planta por la cumbrera y cada mitad se triangula
-    const ov = 0.35; // vuelo del alero
+    if (isFlat) {
+      const shape = pts.map(p => new THREE.Vector2(p[0], p[1]));
+      for (const tr of THREE.ShapeUtils.triangulateShape(shape, [])) {
+        const V = tr.map(k => [pts[k][0], eave + 0.05, pts[k][1]]), U = tr.map(k => [pts[k][0] / 3, pts[k][1] / 3]);
+        const ux = V[1][0] - V[0][0], uz = V[1][2] - V[0][2], wx = V[2][0] - V[0][0], wz = V[2][2] - V[0][2];
+        if (uz * wx - ux * wz < 0) flat.tri(V[0], V[2], V[1], U[0], U[2], U[1]); else flat.tri(V[0], V[1], V[2], U[0], U[1], U[2]);
+      }
+      continue;
+    }
+    const ov = 0.35;
     const grown = offsetPolygon(pts, ov);
     for (const side of [1, -1]) {
       const half_ = clipHalf(grown, side * nx, side * nz, side * mid);
       if (half_.length < 3) continue;
       const shape = half_.map(p => new THREE.Vector2(p[0], p[1]));
       const tris = THREE.ShapeUtils.triangulateShape(shape, []);
-      for (const t of tris) {
-        const P = t.map(k => half_[k]);
+      for (const tr of tris) {
+        const P = tr.map(k => half_[k]);
         const V = P.map(p => [p[0], roofY(p[0], p[1]) + 0.05, p[1]]);
         const U = P.map(p => [(p[0] * rx + p[1] * rz) / 2.2, (p[0] * nx + p[1] * nz) / 2.2]);
-        // orientar hacia arriba
         const ux = V[1][0] - V[0][0], uz = V[1][2] - V[0][2], wx = V[2][0] - V[0][0], wz = V[2][2] - V[0][2];
         if (uz * wx - ux * wz < 0) roof.tri(V[0], V[2], V[1], U[0], U[2], U[1]); else roof.tri(V[0], V[1], V[2], U[0], U[1], U[2]);
       }
     }
-    // canto del alero (grosor de la teja)
     for (let i = 0; i < grown.length; i++) {
       const a = grown[i], c = grown[(i + 1) % grown.length];
       const ha = roofY(a[0], a[1]) + 0.05, hc = roofY(c[0], c[1]) + 0.05;
@@ -200,6 +234,9 @@ export function buildBuildings(data, terrain, tex, colliders) {
   add(facade, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facade, roughness: 0.92 }));
   add(plaster, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facadePlaster, roughness: 0.95 }));
   add(stone, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.stone, roughness: 0.95 }));
+  urbanB.forEach((gb, k) => add(gb, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.urban[k], roughness: 0.9 })));
+  groundB.forEach((gb, k) => add(gb, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.urbanGround[k], roughness: 0.85 })));
+  add(flat, new THREE.MeshStandardMaterial({ map: tex.flatRoof, roughness: 1, vertexColors: true }));
   add(roof, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.roof, roughness: 0.8, side: THREE.DoubleSide }));
   add(eaves, new THREE.MeshStandardMaterial({ color: 0x5a2c1c, roughness: 0.9, side: THREE.DoubleSide }));
   return group;
@@ -223,7 +260,28 @@ function norm(v) { const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1]
 
 // ---------- carreteras y calles: cintas sobre el terreno ----------
 export function buildRoads(data, terrain, tex) {
-  const byMat = { asphalt: new GeoBuilder(), concrete: new GeoBuilder(), dirt: new GeoBuilder() };
+  const byMat = { asphalt: new GeoBuilder(), concrete: new GeoBuilder(), dirt: new GeoBuilder(), sidewalk: new GeoBuilder() };
+  const urban = data.style === 'urban', lamps = [];
+  const STREET = new Set(['residential', 'tertiary', 'secondary', 'primary', 'unclassified', 'living_street', 'tertiary_link', 'secondary_link']);
+  // aceras de baldosa a ambos lados de las calles (solo en ciudad)
+  if (urban) for (const r of data.roads) {
+    if (!STREET.has(r.k) || r.bridge) continue;
+    const P = densify(r.p, 2.5), hw = r.w / 2 + 2.3; let dist = 0;
+    for (let i = 0; i < P.length - 1; i++) {
+      const a = P[i], b = P[i + 1], na = sideNormal(P, i), nb = sideNormal(P, i + 1), L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const y = (p) => terrain.height(p[0], p[1]) + 0.05;
+      const pa = [a[0] + na[0] * hw, a[1] + na[1] * hw], qa = [a[0] - na[0] * hw, a[1] - na[1] * hw];
+      const pb = [b[0] + nb[0] * hw, b[1] + nb[1] * hw], qb = [b[0] - nb[0] * hw, b[1] - nb[1] * hw];
+      byMat.sidewalk.quad([qa[0], y(qa), qa[1]], [pa[0], y(pa), pa[1]], [pb[0], y(pb), pb[1]], [qb[0], y(qb), qb[1]],
+        [0, dist / 2], [hw, dist / 2], [hw, (dist + L) / 2], [0, (dist + L) / 2]);
+      // farolas cada ~28 m, alternando lados
+      if (Math.floor((dist + L) / 28) > Math.floor(dist / 28)) {
+        const side = Math.floor(dist / 28) % 2 ? 1 : -1, o = r.w / 2 + 1.2;
+        lamps.push([a[0] + na[0] * o * side, a[1] + na[1] * o * side, Math.atan2(-na[0] * side, -na[1] * side)]);
+      }
+      dist += L;
+    }
+  }
   for (const r of data.roads) {
     const gb = byMat[r.s] || byMat.asphalt; const hw = r.w / 2;
     const P = densify(r.p, 2.5); let dist = 0;
@@ -245,6 +303,7 @@ export function buildRoads(data, terrain, tex) {
     asphalt: new THREE.MeshStandardMaterial({ map: tex.asphalt, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2 }),
     concrete: new THREE.MeshStandardMaterial({ map: tex.concrete, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2 }),
     dirt: new THREE.MeshStandardMaterial({ map: tex.dirt, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, transparent: true, opacity: 0.85 }),
+    sidewalk: new THREE.MeshStandardMaterial({ map: tex.sidewalk, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -1 }),
   };
   for (const [k, gb] of Object.entries(byMat)) if (gb.pos.length) { const m = new THREE.Mesh(gb.build(), mats[k]); m.receiveShadow = true; group.add(m); }
   // líneas de la carretera nacional
@@ -259,6 +318,16 @@ export function buildRoads(data, terrain, tex) {
         lines.quad([A[0] - na[0] * w, y(A), A[1] - na[1] * w], [A[0] + na[0] * w, y(A), A[1] + na[1] * w], [B[0] + nb[0] * w, y(B), B[1] + nb[1] * w], [B[0] - nb[0] * w, y(B), B[1] - nb[1] * w], [0, 0], [1, 0], [1, 1], [0, 1]);
       }
     }
+  }
+  if (lamps.length) {
+    const pole = new THREE.CylinderGeometry(0.06, 0.09, 6, 6); pole.translate(0, 3, 0);
+    const arm = new THREE.BoxGeometry(0.08, 0.08, 1.2); arm.translate(0, 5.95, 0.55);
+    const head = new THREE.BoxGeometry(0.3, 0.12, 0.55); head.translate(0, 5.9, 1.1);
+    const g = mergeGeometries([pole, arm, head]);
+    const im = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({ color: 0x4a5056, roughness: 0.5, metalness: 0.6 }), lamps.length);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
+    lamps.forEach(([x, z, rot], i) => { q.setFromAxisAngle(up, rot); m.compose(new THREE.Vector3(x, terrain.height(x, z), z), q, new THREE.Vector3(1, 1, 1)); im.setMatrixAt(i, m); });
+    im.castShadow = true; group.add(im); group.userData.lamps = lamps;
   }
   if (lines.pos.length) group.add(new THREE.Mesh(lines.build(), new THREE.MeshStandardMaterial({ color: 0xe8e8e0, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -4 })));
   return group;

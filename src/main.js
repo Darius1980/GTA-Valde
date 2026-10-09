@@ -34,8 +34,8 @@ scene.add(new THREE.HemisphereLight(0xbfd4ee, 0x6b5a40, 0.9));
 const loading = document.getElementById('loading'), bar = document.getElementById('bar');
 const progress = (f, msg) => { bar.style.width = `${Math.round(f * 100)}%`; if (msg) document.getElementById('lmsg').textContent = msg; };
 
-async function load() {
-  const base = import.meta.env.BASE_URL + 'world/';
+async function load(map) {
+  const base = import.meta.env.BASE_URL + 'world/' + map + '/';
   progress(0.05, 'Cargando mapa…');
   const [data, hbuf] = await Promise.all([fetch(base + 'world.json').then(r => r.json()), fetch(base + 'terrain.json').then(r => r.json())]);
   progress(0.3, 'Cargando ortofoto…');
@@ -59,9 +59,23 @@ async function load() {
 }
 
 const input = new Input(canvas);
+
+// Selección de mapa: por enlace (#valde, #beraun) o con los botones de la portada
+function waitForMap() {
+  const maps = ['valde', 'beraun'];
+  const h = location.hash.replace('#', '');
+  if (maps.includes(h)) return Promise.resolve(h);
+  const menu = document.getElementById('maps'); menu.hidden = false;
+  document.getElementById('lmsg').textContent = 'Elige dónde jugar';
+  return new Promise(res => menu.addEventListener('click', e => {
+    const b = e.target.closest('[data-map]'); if (!b) return;
+    menu.hidden = true; try { history.replaceState(null, '', '#' + b.dataset.map); } catch (_) {}
+    res(b.dataset.map);
+  }));
+}
 const hud = { mode: document.getElementById('mode'), speed: document.getElementById('speed'), hint: document.getElementById('hint'), place: document.getElementById('place') };
 
-load().then(({ data, terrain, colliders, trees, oFull }) => {
+waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull }) => {
   const world = { terrain, colliders, scene };
   const player = new Player(world); scene.add(player.mesh);
   player.pos.set(data.spawn[0], terrain.height(data.spawn[0], data.spawn[1]), data.spawn[1]);
@@ -77,6 +91,8 @@ load().then(({ data, terrain, colliders, trees, oFull }) => {
   camera.position.copy(player.pos).add(new THREE.Vector3(0, 3, -6));
 
   loading.classList.add('done');
+  document.getElementById('place').textContent = data.title;
+  if (data.style === 'urban') { scene.fog.color.set(0xc4ccd4); su.turbidity.value = 7; sun.intensity = 2.2; }
   document.getElementById('help').classList.add('show');
   setTimeout(() => document.getElementById('help').classList.remove('show'), 9000);
 
