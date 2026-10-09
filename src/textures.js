@@ -148,6 +148,73 @@ export function makeTextures(renderer) {
     for (let i = 0; i < 60; i++) { g.fillStyle = `rgba(20,15,10,${0.2 + r() * 0.3})`; g.fillRect(r() * 64, 0, 1 + r() * 3, 128); }
     out.bark = tex(c);
   }
-  for (const t of Object.values(out)) t.anisotropy = max;
+  // Fachadas urbanas (bloques de viviendas de los años 60-80): 256 px = 3 m x 2,8 m (una planta)
+  const WALLS = ['#e9e1cf', '#d9c9a8', '#cfd2cc', '#e4d2bd', '#c7a98a', '#bfc4c9', '#efe9de', '#d8b79a'];
+  out.urban = WALLS.map((wc, k) => {
+    const [c, g] = canvas(256, 256); const r = rng(100 + k);
+    const brick = k === 4 || k === 7;
+    g.fillStyle = wc; g.fillRect(0, 0, 256, 256);
+    if (brick) for (let y = 0; y < 256; y += 8) for (let x = (y / 8) % 2 ? -10 : 0; x < 256; x += 20) {
+      const v = (r() - 0.5) * 30; g.fillStyle = `rgb(${165 + v | 0},${90 + v / 2 | 0},${65 + v / 3 | 0})`; g.fillRect(x + 1, y + 1, 18, 6);
+    }
+    for (let i = 0; i < 1500; i++) { g.fillStyle = `rgba(0,0,0,${r() * 0.05})`; g.fillRect(r() * 256, r() * 256, 2 + r() * 6, 2 + r() * 6); }
+    // manchas de humedad bajo el alféizar (clima húmedo)
+    const grd = g.createLinearGradient(0, 200, 0, 256); grd.addColorStop(0, 'rgba(60,60,50,0.18)'); grd.addColorStop(1, 'rgba(60,60,50,0)');
+    g.fillStyle = grd; g.fillRect(70, 200, 116, 56);
+    const balcony = k % 3 === 0;
+    const wx = 68, wy = 48, ww = 120, wh = balcony ? 170 : 140;
+    g.fillStyle = '#f4f4f2'; g.fillRect(wx - 6, wy - 6, ww + 12, wh + 12); // marco de PVC / aluminio
+    g.fillStyle = '#26323a'; g.fillRect(wx, wy, ww, wh);
+    g.fillStyle = 'rgba(150,180,200,0.35)'; g.fillRect(wx + 4, wy + 4, ww / 2 - 6, wh - 8);
+    g.fillStyle = 'rgba(255,255,255,0.18)'; g.beginPath(); g.moveTo(wx + 8, wy + 8); g.lineTo(wx + 40, wy + 8); g.lineTo(wx + 8, wy + 60); g.fill();
+    g.fillStyle = '#f4f4f2'; g.fillRect(wx + ww / 2 - 2, wy, 4, wh);
+    // persiana enrollable a media altura
+    const sh = 20 + r() * 70; g.fillStyle = ['#e8e4dc', '#b9a27f', '#6c5a48', '#d6d8d6'][k % 4]; g.fillRect(wx, wy, ww, sh);
+    g.fillStyle = 'rgba(0,0,0,0.12)'; for (let y = wy; y < wy + sh; y += 4) g.fillRect(wx, y, ww, 1);
+    g.fillStyle = '#c9c4ba'; g.fillRect(wx - 10, wy + wh + 6, ww + 20, 8); // alféizar
+    if (balcony) { // barandilla de balcón
+      g.fillStyle = 'rgba(40,40,40,0.9)'; g.fillRect(wx - 20, wy + wh - 70, ww + 40, 5);
+      for (let x = wx - 20; x <= wx + ww + 20; x += 9) g.fillRect(x, wy + wh - 70, 3, 76);
+      g.fillStyle = '#b8b2a6'; g.fillRect(wx - 24, wy + wh + 4, ww + 48, 10);
+    }
+    if (r() < 0.3) { g.fillStyle = '#5d6b77'; g.fillRect(200, 20, 30, 24); } // aire acondicionado / tendedero
+    return tex(c);
+  });
+  // Planta baja: lonjas y portales
+  out.urbanGround = [0, 1].map(k => {
+    const [c, g] = canvas(256, 256); const r = rng(300 + k);
+    g.fillStyle = k ? '#8d8a84' : '#a39c8f'; g.fillRect(0, 0, 256, 256);
+    for (let y = 0; y < 256; y += 32) { g.fillStyle = 'rgba(0,0,0,0.12)'; g.fillRect(0, y, 256, 2); }
+    if (k === 0) { // persiana metálica de lonja con pintadas
+      g.fillStyle = '#9ea3a6'; g.fillRect(24, 50, 208, 206);
+      g.fillStyle = 'rgba(0,0,0,0.15)'; for (let y = 50; y < 256; y += 6) g.fillRect(24, y, 208, 2);
+      const cols = ['#d23', '#26b', '#2a4', '#fb2', '#000'];
+      for (let i = 0; i < 6; i++) { g.strokeStyle = cols[Math.floor(r() * 5)]; g.lineWidth = 3 + r() * 4; g.beginPath(); g.moveTo(40 + r() * 170, 100 + r() * 120); for (let k2 = 0; k2 < 4; k2++) g.lineTo(40 + r() * 170, 100 + r() * 120); g.stroke(); }
+    } else { // portal de cristal
+      g.fillStyle = '#3b3f42'; g.fillRect(70, 40, 116, 216);
+      g.fillStyle = 'rgba(170,200,220,0.5)'; g.fillRect(78, 48, 46, 200); g.fillRect(132, 48, 46, 200);
+      g.fillStyle = '#d4af37'; g.fillRect(120, 150, 4, 20);
+      g.fillStyle = '#ddd'; g.fillRect(60, 20, 136, 14);
+    }
+    return tex(c);
+  });
+  // Cubierta plana (tela asfáltica / grava)
+  {
+    const [c, g] = canvas(256, 256); const r = rng(41);
+    g.fillStyle = '#6f6e6a'; g.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 9000; i++) { const v = 80 + r() * 70 | 0; g.fillStyle = `rgba(${v},${v},${v - 4},0.5)`; g.fillRect(r() * 256, r() * 256, 2, 2); }
+    out.flatRoof = tex(c);
+  }
+  // Acera de baldosas
+  {
+    const [c, g] = canvas(256, 256); const r = rng(43);
+    g.fillStyle = '#b3aea5'; g.fillRect(0, 0, 256, 256);
+    for (let y = 0; y < 256; y += 32) for (let x = 0; x < 256; x += 32) {
+      const v = (r() - 0.5) * 18; g.fillStyle = `rgb(${178 + v | 0},${173 + v | 0},${164 + v | 0})`; g.fillRect(x + 1, y + 1, 30, 30);
+      for (let k = 0; k < 9; k++) { g.fillStyle = 'rgba(0,0,0,0.07)'; g.fillRect(x + 4 + (k % 3) * 9, y + 4 + Math.floor(k / 3) * 9, 6, 6); } // pastilla
+    }
+    out.sidewalk = tex(c);
+  }
+  for (const t of [...Object.values(out)].flat()) t.anisotropy = max;
   return out;
 }

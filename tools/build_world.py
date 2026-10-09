@@ -1,16 +1,18 @@
 """Convierte los datos descargados (data/) en el mundo del juego (public/world/).
 
-Uso: python3 tools/build_world.py
+Uso: python3 tools/build_world.py <mapa>
 Sistema local: x = Este - cx, z = -(Norte - cy) (metros), centro en el nodo OSM del pueblo.
 """
-import glob, json, math, os, re, shutil
+import glob, json, math, os, re, shutil, sys
 import numpy as np
 import tifffile
 from PIL import Image
 from pyproj import Transformer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-D = os.path.join(ROOT, "data"); OUT = os.path.join(ROOT, "public", "world")
+NAME = sys.argv[1] if len(sys.argv) > 1 else "valde"
+CFG = json.load(open(os.path.join(ROOT, "tools", "maps.json")))[NAME]
+D = os.path.join(ROOT, "data", NAME); OUT = os.path.join(ROOT, "public", "world", NAME)
 os.makedirs(OUT, exist_ok=True)
 meta = json.load(open(os.path.join(D, "meta.json")))
 cx, cy = meta["utm"]; HALF = meta["half"]
@@ -44,7 +46,7 @@ Image.open(os.path.join(D, "ortho.jpg")).convert("RGB").save(os.path.join(OUT, "
 Image.open(os.path.join(D, "ortho_center.jpg")).convert("RGB").save(os.path.join(OUT, "ortho_center.jpg"), quality=88)
 # límites [xmin, z(v=0), xmax, z(v=1)]; v=0 es el borde inferior (sur) de la imagen
 ortho = {"full": {"file": "ortho.jpg", "bounds": [-HALF, HALF, HALF, -HALF]},
-         "center": {"file": "ortho_center.jpg", "bounds": [-300, 300, 300, -300]}}
+         "center": {"file": "ortho_center.jpg", "bounds": [-CFG.get("detail_half", 300), CFG.get("detail_half", 300), CFG.get("detail_half", 300), -CFG.get("detail_half", 300)]}}
 
 # ---------------- edificios (Catastro) ----------------
 def parse_gml(path):
@@ -98,12 +100,14 @@ def way_pts(w):
 
 ROADS = {"trunk": (7.5, "asphalt"), "primary": (7, "asphalt"), "secondary": (6.5, "asphalt"), "tertiary": (6, "asphalt"),
          "unclassified": (5, "asphalt"), "residential": (5, "asphalt"), "living_street": (4, "concrete"),
-         "service": (3.5, "concrete"), "pedestrian": (4, "concrete"), "track": (3, "dirt"), "path": (1.2, "dirt"), "footway": (1.5, "concrete")}
+         "service": (3.5, "concrete"), "pedestrian": (4, "concrete"), "track": (3, "dirt"), "path": (1.2, "dirt"), "footway": (2, "concrete"), "steps": (2, "concrete"),
+         "primary_link": (5, "asphalt"), "secondary_link": (5, "asphalt"), "tertiary_link": (5, "asphalt"), "motorway": (11, "asphalt"), "motorway_link": (6, "asphalt"), "trunk_link": (6, "asphalt")}
 roads, walls, names = [], [], []
 for w in (e for e in osm if e["type"] == "way"):
     t = w.get("tags", {}); pts = way_pts(w)
     if len(pts) < 2: continue
     hw = t.get("highway")
+    if t.get("tunnel") in ("yes", "building_passage") or t.get("indoor") == "yes": hw = None
     if hw in ROADS:
         wd, s = ROADS[hw]
         surf = t.get("surface")
@@ -112,12 +116,50 @@ for w in (e for e in osm if e["type"] == "way"):
         elif surf in ("unpaved", "gravel", "dirt", "ground", "compacted"): s = "dirt"
         if hw == "residential" and not surf: s = "asphalt"
         r = {"k": hw, "w": wd, "s": s, "p": pts}
-        if hw in ("trunk", "primary", "secondary"): r["lines"] = True
+        if hw in ("trunk", "primary", "secondary", "motorway"): r["lines"] = True
+        if t.get("bridge") == "yes": r["bridge"] = True
         if t.get("name"): r["name"] = t["name"]
         roads.append(r)
     elif t.get("barrier") == "wall":
         walls.append({"p": pts, "h": 1.3})
 print("vias:", len(roads), "muros:", len(walls))
+
+# Edificios de OSM cuando no hay Catastro (País Vasco, Navarra)
+def parse_levels(t):
+    for k in ("building:levels",):
+        try: return max(1, int(float(t[k].split(";")[0])))
+        except Exception: pass
+    try: return max(1, round(float(t["height"].replace("m", "").strip()) / 3.0))
+    except Exception: pass
+    return None
+DEFAULT_LEVELS = {"house": 2, "detached": 2, "semidetached_house": 2, "terrace": 3, "garage": 1, "garages": 1, "shed": 1, "roof": 1,
+                  "industrial": 2, "warehouse": 2, "school": 3, "church": 3, "commercial": 3, "retail": 2, "apartments": 7, "residential": 6}
+def add_osm_building(pts, t):
+    if len(pts) < 3: return
+    if pts[0] == pts[-1]: pts = pts[:-1]
+    if len(pts) < 3 or abs(area(pts)) < 6: return
+    if t.get("building") in ("roof", "construction") or t.get("location") == "underground" or t.get("layer", "0").startswith("-"): return
+    lv = parse_levels(t) or DEFAULT_LEVELS.get(t.get("building"), 4 if abs(area(pts)) > 250 else 2)
+    b = t.get("building")
+    kind = "pub" if (b in ("church", "chapel", "school", "public", "civic") or t.get("amenity") in ("place_of_worship", "school", "townhall")) else \
+           "agr" if b in ("garage", "garages", "shed", "barn", "farm_auxiliary") else "ind" if b in ("industrial", "warehouse") else "res"
+    flat = abs(area(pts)) > 260 or t.get("roof:shape") == "flat"
+    buildings.append({"p": pts, "f": lv, "use": kind, "flat": flat, "min": parse_min(t), "name": t.get("name")})
+def parse_min(t):
+    try: return int(t.get("building:min_level", 0))
+    except Exception: return 0
+if not CFG.get("catastro"):
+    ways = {e["id"]: e for e in osm if e["type"] == "way"}
+    for w in ways.values():
+        t = w.get("tags", {})
+        if "building" in t or "building:part" in t and "building" not in t:
+            if "building:part" in t and "building" not in t: continue  # partes: se usa el contorno del edificio
+            add_osm_building(way_pts(w), t)
+    for r in (e for e in osm if e["type"] == "relation" and "building" in e.get("tags", {})):
+        for m in r.get("members", []):
+            if m["type"] == "way" and m.get("role") == "outer" and m["ref"] in ways:
+                add_osm_building(way_pts(ways[m["ref"]]), r["tags"])
+    print("edificios OSM:", len(buildings))
 
 # ---------------- árboles a partir de la ortofoto ----------------
 img = np.asarray(Image.open(os.path.join(D, "ortho.jpg")).convert("RGB")).astype(np.float32)
@@ -176,13 +218,14 @@ def clear(pt, r=2.6):
     return True
 
 cars = []
-village = [r for r in roads if r["k"] in ("residential", "unclassified", "tertiary", "living_street")]
+village = [r for r in roads if r["k"] in ("residential", "unclassified", "tertiary", "living_street", "secondary")]
+MAXCARS = CFG.get("cars", 9); RADIUS = CFG.get("car_radius", 220)
 for r in village:
     P = r["p"]
     for k in range(len(P) - 1):
         a, b = P[k], P[k + 1]; L = math.dist(a, b)
         m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
-        if L < 10 or len(cars) >= 9 or math.hypot(*m) > 220: continue
+        if L < 10 or len(cars) >= MAXCARS or math.hypot(*m) > RADIUS: continue
         ux, uz = (b[0] - a[0]) / L, (b[1] - a[1]) / L
         for side in (1, -1):
             p = [m[0] - uz * side * (r["w"] / 2 + 1.0), m[1] + ux * side * (r["w"] / 2 + 1.0)]
@@ -198,7 +241,7 @@ if not clear(spawn, 1):
         cand = [spawn[0] + k, spawn[1]]
         if clear(cand, 1): spawn = cand; break
 
-world = {"terrain": terrain, "ortho": ortho, "buildings": buildings, "roads": roads, "walls": walls,
+world = {"name": NAME, "title": CFG["title"], "style": CFG.get("style", "rural"), "terrain": terrain, "ortho": ortho, "buildings": buildings, "roads": roads, "walls": walls,
          "trees": trees, "cars": cars, "spawn": spawn}
 json.dump(world, open(os.path.join(OUT, "world.json"), "w"), separators=(",", ":"))
 print("world.json", os.path.getsize(os.path.join(OUT, "world.json")) // 1024, "KB")
