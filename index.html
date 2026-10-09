@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#111">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>GTA Valde</title>
+<link rel="icon" href="./favicon.svg">
+<link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="loading">
+  <div class="logo"><span>GTA</span> Valde</div>
+  <div class="sub">Val de Santa María · Zamora</div>
+  <div class="track"><div id="bar"></div></div>
+  <div id="lmsg">Cargando…</div>
+  <div class="credits">Datos: © OpenStreetMap · Catastro · PNOA y MDT © IGN (CC BY 4.0, scne.es)</div>
+</div>
+
+<div id="hud">
+  <div id="mode">A pie</div>
+  <div id="speed"></div>
+  <div id="hint"></div>
+</div>
+<div id="place">Val de Santa María</div>
+
+<div id="help">
+  <b>Controles</b><br>
+  <span class="desk">WASD / flechas: mover · Ratón: cámara (clic para capturar)<br>Shift: correr · Espacio: saltar / freno · E: subir o bajar del coche</span>
+  <span class="mob">Joystick: mover · Arrastra la pantalla: cámara<br>🚪 coche · ⤒ saltar / frenar · 🏃 correr</span>
+</div>
+
+<div id="touch">
+  <div id="stick"><div id="knob"></div></div>
+  <div id="btns">
+    <div class="btn" data-btn="action">🚪</div>
+    <div class="btn" data-btn="jump">⤒</div>
+    <div class="btn" data-btn="run">🏃</div>
+  </div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
