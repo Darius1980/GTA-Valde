@@ -36,7 +36,7 @@ const progress = (f, msg) => { bar.style.width = `${Math.round(f * 100)}%`; if (
 async function load() {
   const base = import.meta.env.BASE_URL + 'world/';
   progress(0.05, 'Cargando mapa…');
-  const [data, hbuf] = await Promise.all([fetch(base + 'world.json').then(r => r.json()), fetch(base + 'terrain.bin').then(r => r.arrayBuffer())]);
+  const [data, hbuf] = await Promise.all([fetch(base + 'world.json').then(r => r.json()), fetch(base + 'terrain.json').then(r => r.json())]);
   progress(0.3, 'Cargando ortofoto…');
   const tl = new THREE.TextureLoader();
   const loadTex = (f) => new Promise(res => tl.load(base + f, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); res(t); }));
@@ -44,7 +44,7 @@ async function load() {
   progress(0.6, 'Construyendo el pueblo…');
   await new Promise(r => setTimeout(r, 20));
   const tex = makeTextures(renderer);
-  const terrain = new Terrain(data.terrain, new Float32Array(hbuf));
+  const terrain = new Terrain(data.terrain, Float32Array.from(hbuf.h, v => v * hbuf.scale));
   data.terrain.ortho = data.ortho; // límites para el shader
   const meta = { ...data.terrain, ortho: { full: data.ortho.full.bounds, center: data.ortho.center.bounds } };
   scene.add(buildTerrain(meta, terrain, oFull, oCenter, tex));

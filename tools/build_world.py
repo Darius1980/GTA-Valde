@@ -29,7 +29,8 @@ dem = blur(dem, 1.3)
 n = dem.shape[0]; cell = 2 * HALF / n
 y0 = float(np.round(dem[n // 2, n // 2]))
 heights = (dem - y0).astype(np.float32)          # alturas relativas al centro del pueblo
-heights.tofile(os.path.join(OUT, "terrain.bin"))
+# alturas en pasos de 5 cm, como JSON (servible en cualquier hosting estático)
+json.dump({"scale": 0.05, "h": np.round(heights / 0.05).astype(int).ravel().tolist()}, open(os.path.join(OUT, "terrain.json"), "w"), separators=(",", ":"))
 terrain = {"n": n, "cell": cell, "origin": [-HALF + cell / 2, -HALF + cell / 2], "base": y0}
 def H(x, z):
     fx = (x - terrain["origin"][0]) / cell; fz = (z - terrain["origin"][1]) / cell
