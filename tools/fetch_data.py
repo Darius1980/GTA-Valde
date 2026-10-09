@@ -108,3 +108,30 @@ try:
     save("mdt.tif", get(wcs))
 except Exception as e:
     print("mdt fail", e)
+
+# --- LiDAR del Gobierno Vasco (MDS y MDT a 1 m): altura real de los edificios
+if CFG.get("euskadi_lidar"):
+    wcsb = "https://www.geo.euskadi.eus/geoeuskadi/services/U11/WCS_KARTOGRAFIA/MapServer/WCSServer?"
+    n = int(2 * HALF)
+    for cov, fname in [("MDS_LIDAR_1M_EGUNERATUENA_MAS_ACTUALIZADA", "mds1.tif"), ("MDT_LIDAR_1M_EGUNERATUENA_MAS_ACTUALIZADA", "mdt1.tif")]:
+        variants = [
+            {"SERVICE": "WCS", "VERSION": "1.0.0", "REQUEST": "GetCoverage", "COVERAGE": cov, "CRS": "EPSG:25830",
+             "BBOX": f"{x0},{y0},{x1},{y1}", "WIDTH": n, "HEIGHT": n, "FORMAT": "GeoTIFF"},
+            {"SERVICE": "WCS", "VERSION": "1.1.1", "REQUEST": "GetCoverage", "IDENTIFIER": cov,
+             "BOUNDINGBOX": f"{x0},{y0},{x1},{y1},urn:ogc:def:crs:EPSG::25830", "GRIDBASECRS": "urn:ogc:def:crs:EPSG::25830",
+             "GRIDOFFSETS": "1,-1", "FORMAT": "image/GeoTIFF", "STORE": "false"},
+        ]
+        for k, v in enumerate(variants):
+            try:
+                blob = get(wcsb + urllib.parse.urlencode(v), timeout=300)
+                print(fname, "variant", k, len(blob), blob[:120])
+                if blob[:2] in (b"II", b"MM"):
+                    save(fname, blob); break
+                # WCS 1.1 devuelve multipart: extraer el TIFF
+                i = blob.find(b"II*\x00")
+                if i < 0: i = blob.find(b"MM\x00*")
+                if i >= 0:
+                    save(fname, blob[i:]); break
+                save(fname + f".err{k}.txt", blob[:5000])
+            except Exception as e:
+                print("lidar fail", fname, k, e)
