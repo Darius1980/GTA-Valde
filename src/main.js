@@ -5,6 +5,7 @@ import { makeTextures } from './textures.js';
 import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, Trees } from './world.js';
 import { Player } from './player.js';
 import { Car } from './car.js';
+import { Minimap, EngineSound } from './hud.js';
 
 const isMobile = matchMedia('(pointer: coarse)').matches;
 const canvas = document.getElementById('game');
@@ -54,13 +55,13 @@ async function load() {
   scene.add(buildWalls(data, terrain, tex, colliders));
   const trees = new Trees(data, terrain, tex, colliders); scene.add(trees.group);
   progress(0.95, 'Últimos detalles…');
-  return { data, terrain, colliders, trees };
+  return { data, terrain, colliders, trees, oFull };
 }
 
 const input = new Input(canvas);
 const hud = { mode: document.getElementById('mode'), speed: document.getElementById('speed'), hint: document.getElementById('hint'), place: document.getElementById('place') };
 
-load().then(({ data, terrain, colliders, trees }) => {
+load().then(({ data, terrain, colliders, trees, oFull }) => {
   const world = { terrain, colliders, scene };
   const player = new Player(world); scene.add(player.mesh);
   player.pos.set(data.spawn[0], terrain.height(data.spawn[0], data.spawn[1]), data.spawn[1]);
@@ -68,6 +69,10 @@ load().then(({ data, terrain, colliders, trees }) => {
   const cars = data.cars.map(([x, z, h], i) => { const c = new Car(world, palette[i % palette.length], i % 3 === 1 ? 'suv' : 'sedan'); c.place(x, z, h); scene.add(c.mesh); return c; });
   world.cars = cars;
   let driving = null;
+  const streets = data.roads.filter(r => r.k !== 'track' && r.k !== 'path').map(r => r.p);
+  const minimap = new Minimap(document.getElementById('minimap'), oFull.image, data.ortho.full.bounds, streets);
+  const engine = new EngineSound();
+  for (const ev of ['keydown', 'touchstart', 'mousedown']) addEventListener(ev, () => engine.start(), { once: true });
   const camState = { yaw: player.heading + Math.PI, pitch: 0.25, dist: 5.5, pos: new THREE.Vector3() };
   camera.position.copy(player.pos).add(new THREE.Vector3(0, 3, -6));
 
@@ -76,7 +81,7 @@ load().then(({ data, terrain, colliders, trees }) => {
   setTimeout(() => document.getElementById('help').classList.remove('show'), 9000);
 
   const clock = new THREE.Clock();
-  const tmp = new THREE.Vector3();
+  const tmp = new THREE.Vector3(); let frameNo = 0;
   function frame() {
     const dt = Math.min(0.05, clock.getDelta());
     const look = input.consumeLook();
@@ -88,7 +93,7 @@ load().then(({ data, terrain, colliders, trees }) => {
       else {
         let best = null, bd = 4.5;
         for (const c of cars) { const d = c.pos.distanceTo(player.pos); if (d < bd) { bd = d; best = c; } }
-        if (best) { driving = best; best.driver = true; player.enterCar(best); }
+        if (best) { driving = best; best.driver = true; player.enterCar(best); camState.yaw = best.heading + Math.PI; camState.pitch = 0.18; }
       }
     }
     if (driving) driving.update(dt, input, camState.yaw); else player.update(dt, input, camState.yaw);
@@ -103,8 +108,10 @@ load().then(({ data, terrain, colliders, trees }) => {
     }
     const cp = Math.cos(camState.pitch);
     tmp.set(Math.sin(camState.yaw) * cp * dist, Math.sin(camState.pitch) * dist + height, Math.cos(camState.yaw) * cp * dist).add(target);
+    const hitT = colliders.raycast(target.x, target.z, tmp.x, tmp.z);
+    if (hitT < 1) { const k = Math.max(0.05, hitT - 0.4 / dist); tmp.x = target.x + (tmp.x - target.x) * k; tmp.z = target.z + (tmp.z - target.z) * k; }
     const gy = terrain.height(tmp.x, tmp.z) + 0.6; if (tmp.y < gy) tmp.y = gy;
-    camera.position.lerp(tmp, 1 - Math.exp(-dt * 12));
+    camera.position.lerp(tmp, hitT < 1 ? 1 - Math.exp(-dt * 30) : 1 - Math.exp(-dt * 12));
     camera.lookAt(target.x, target.y + height, target.z);
     const fc = window.__game?.freeCam; if (fc) { camera.position.set(...fc.pos); camera.lookAt(...fc.look); }
 
@@ -112,6 +119,9 @@ load().then(({ data, terrain, colliders, trees }) => {
     // la sombra sigue al jugador
     sun.position.copy(target).addScaledVector(sunDir, 200); sun.target.position.copy(target);
 
+    engine.update(!!driving, driving ? driving.speed : 0, driving ? input.axes().y : 0);
+    if ((frameNo++ & 1) === 0) minimap.draw(target.x, target.z, driving ? driving.heading : player.heading, camState.yaw, cars, driving);
+    camera.fov += ((driving ? 60 + Math.min(15, Math.abs(driving.speed) * 0.5) : 60) - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix();
     hud.mode.textContent = driving ? 'Conduciendo' : 'A pie';
     hud.speed.textContent = driving ? `${Math.round(Math.abs(driving.speed) * 3.6)} km/h` : '';
     const near = !driving && cars.some(c => c.pos.distanceTo(player.pos) < 4.5);

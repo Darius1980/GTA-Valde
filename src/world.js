@@ -29,6 +29,22 @@ export class Colliders {
     }
   }
   addPolygon(pts, kind) { for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; this.addSegment(a[0], a[1], b[0], b[1], kind); } }
+  // Primera intersección del segmento a→b con edificios (fracción 0..1), para que la cámara no atraviese paredes
+  raycast(ax, az, bx, bz) {
+    const c = this.cell; let best = 1; const seen = new Set();
+    const i0 = Math.floor(Math.min(ax, bx) / c), i1 = Math.floor(Math.max(ax, bx) / c), j0 = Math.floor(Math.min(az, bz) / c), j1 = Math.floor(Math.max(az, bz) / c);
+    const rx = bx - ax, rz = bz - az;
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+      const list = this.map.get(this.key(i, j)); if (!list) continue;
+      for (const s of list) {
+        if (s.kind !== 'building' || seen.has(s)) continue; seen.add(s);
+        const sx = s.bx - s.ax, sz = s.bz - s.az, den = rx * sz - rz * sx; if (Math.abs(den) < 1e-9) continue;
+        const t = ((s.ax - ax) * sz - (s.az - az) * sx) / den, u = ((s.ax - ax) * rz - (s.az - az) * rx) / den;
+        if (t > 0 && t < best && u >= 0 && u <= 1) best = t;
+      }
+    }
+    return best;
+  }
   // Empuja un círculo fuera de los segmentos cercanos. Devuelve la normal acumulada (o null).
   resolve(pos, r) {
     const c = this.cell, seen = new Set(); let hit = null;

@@ -27,7 +27,7 @@ export class Car {
       this.steer += (a.x * maxSteer - this.steer) * Math.min(1, dt * 6);
       const throttle = a.y;
       if (input.brake) this.speed -= Math.sign(this.speed) * Math.min(Math.abs(this.speed), 14 * dt);
-      else if (throttle > 0) this.speed += (this.speed < 0 ? 12 : 7 * (1 - this.speed / 44)) * throttle * dt;
+      else if (throttle > 0) this.speed += (this.speed < 0 ? 12 : 11 * (1 - this.speed / 50)) * throttle * dt;
       else if (throttle < 0) this.speed += (this.speed > 0 ? 12 : 4 * (1 + this.speed / 12)) * throttle * dt;
     } else this.steer *= 0.9;
     // rozamiento y resistencia
@@ -62,7 +62,7 @@ export class Car {
     }
     // ruedas
     for (const w of this.mesh.userData.wheels) {
-      w.spin.rotation.x += this.speed * dt / 0.34;
+      w.spin.rotation.x += this.speed * dt / w.R;
       if (w.front) w.pivot.rotation.y = -this.steer;
     }
   }

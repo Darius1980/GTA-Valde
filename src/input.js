@@ -78,7 +78,7 @@ export class Input {
     return { x: Math.max(-1, Math.min(1, x)), y: Math.max(-1, Math.min(1, y)) };
   }
   get run() { return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.buttons.run || Math.hypot(this.move.x, this.move.y) > 0.95; }
-  get brake() { return this.keys.has('Space') || this.buttons.brake; }
+  get brake() { return this.keys.has('Space') || this.buttons.brake || this.buttons.jump; }
   wasPressed(...codes) { return codes.some(c => this.pressed.has(c)); }
   consumeLook() { const l = { ...this.look }; this.look.dx = this.look.dy = 0; return l; }
   endFrame() { this.pressed.clear(); }
