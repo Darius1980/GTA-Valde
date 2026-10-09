@@ -39,26 +39,43 @@ meta = {"center": [LAT, LON], "utm": [cx, cy], "half": HALF,
 save("meta.json", json.dumps(meta, indent=1).encode())
 
 # --- OpenStreetMap
-q = f"[out:json][timeout:120];(nwr({lat0},{lon0},{lat1},{lon1}););out body;>;out skel qt;"
-for ep in ["https://overpass-api.de/api/interpreter",
-           "https://overpass.kumi.systems/api/interpreter"]:
-    try:
-        save("osm.json", get(ep, urllib.parse.urlencode({"data": q}).encode()))
+import time
+q = f"[out:json][timeout:90];(way({lat0},{lon0},{lat1},{lon1});node({lat0},{lon0},{lat1},{lon1}););out body;>;out skel qt;"
+done = False
+for attempt in range(4):
+    for ep in ["https://overpass-api.de/api/interpreter",
+               "https://overpass.private.coffee/api/interpreter",
+               "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+               "https://overpass.kumi.systems/api/interpreter"]:
+        try:
+            save("osm.json", get(ep, urllib.parse.urlencode({"data": q}).encode()))
+            done = True
+            break
+        except Exception as e:
+            print("overpass fail", ep, e)
+    if done:
         break
-    except Exception as e:
-        print("overpass fail", ep, e)
+    time.sleep(20)
 
 # --- Catastro INSPIRE (edificios y partes de edificio con plantas)
 base = "https://ovc.catastro.meh.es/INSPIRE/wfsBU.aspx?"
-for tname, fname in [("BU.BUILDING", "catastro_building.gml"),
-                     ("BU.BUILDINGPART", "catastro_buildingpart.gml")]:
-    params = {"service": "WFS", "version": "2.0.0", "request": "GetFeature",
-              "typeNames": tname, "srsName": "EPSG::25830",
-              "bbox": f"{x0:.1f},{y0:.1f},{x1:.1f},{y1:.1f}"}
-    try:
-        save(fname, get(base + urllib.parse.urlencode(params)))
-    except Exception as e:
-        print("catastro fail", tname, e)
+# El servicio limita la extensión por petición: se pide en teselas de 500 m.
+T = 500
+for tname, prefix in [("BU.BUILDING", "catastro_building"),
+                      ("BU.BUILDINGPART", "catastro_buildingpart")]:
+    for i in range(int(2 * HALF / T)):
+        for j in range(int(2 * HALF / T)):
+            bx, by = x0 + i * T, y0 + j * T
+            params = {"service": "WFS", "version": "2.0.0", "request": "GetFeature",
+                      "typeNames": tname, "srsName": "EPSG::25830",
+                      "bbox": f"{bx:.1f},{by:.1f},{bx + T:.1f},{by + T:.1f}"}
+            try:
+                blob = get(base + urllib.parse.urlencode(params))
+                if b"ExceptionReport" in blob[:400]:
+                    print("catastro exc", tname, i, j, blob[:400])
+                save(f"{prefix}_{i}_{j}.gml", blob)
+            except Exception as e:
+                print("catastro fail", tname, e)
 
 # --- Ortofoto PNOA (IGN), 2048 px para 2 km => ~1 m/px
 wms = "https://www.ign.es/wms-inspire/pnoa-ma?" + urllib.parse.urlencode({
@@ -69,6 +86,17 @@ try:
     save("ortho.jpg", get(wms))
 except Exception as e:
     print("pnoa fail", e)
+
+# Ortofoto de detalle del casco urbano: 600 m a 0,25 m/px
+D = 300
+wms2 = "https://www.ign.es/wms-inspire/pnoa-ma?" + urllib.parse.urlencode({
+    "SERVICE": "WMS", "VERSION": "1.3.0", "REQUEST": "GetMap", "LAYERS": "OI.OrthoimageCoverage",
+    "STYLES": "", "CRS": "EPSG:25830", "BBOX": f"{cx - D},{cy - D},{cx + D},{cy + D}",
+    "WIDTH": 2400, "HEIGHT": 2400, "FORMAT": "image/jpeg"})
+try:
+    save("ortho_center.jpg", get(wms2))
+except Exception as e:
+    print("pnoa center fail", e)
 
 # --- Modelo digital del terreno (IGN MDT, WCS) 5 m
 wcs = "https://servicios.idee.es/wcs-inspire/mdt?" + urllib.parse.urlencode({
