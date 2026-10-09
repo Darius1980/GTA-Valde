@@ -1,8 +1,10 @@
 name: Fetch map data
 on:
   push:
-    paths: [tools/fetch_data.py, .github/workflows/fetch-osm.yml]
+    paths: [tools/fetch_data.py, tools/maps.json, .github/workflows/fetch-osm.yml]
   workflow_dispatch:
+    inputs:
+      map: { description: "Mapa (tools/maps.json)", required: true, default: beraun }
 permissions:
   contents: write
 jobs:
@@ -11,10 +13,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: pip install pyproj
-      - run: python tools/fetch_data.py data
+      # en un push se descargan los mapas que aún no tienen datos
+      - run: |
+          for m in ${{ github.event.inputs.map || '$(python3 -c "import json;print(\" \".join(json.load(open(\"tools/maps.json\"))))")' }}; do
+            if [ -n "${{ github.event.inputs.map }}" ] || [ ! -f "data/$m/osm.json" ]; then python tools/fetch_data.py "$m"; fi
+          done
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data
-          git commit -m "data: map extract of Val de Santa María" || exit 0
+          git commit -m "data: map extract" || exit 0
+          git pull --rebase
           git push

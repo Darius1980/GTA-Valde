@@ -1,0 +1,4 @@
+{
+  "valde": { "title": "Val de Santa María", "lat": 41.9660505, "lon": -6.2120333, "half": 1000, "detail_half": 300, "catastro": true },
+  "beraun": { "title": "Beraun", "query": "Beraun, Errenteria, Gipuzkoa", "half": 700, "detail_half": 350, "catastro": false }
+}
