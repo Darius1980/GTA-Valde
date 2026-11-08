@@ -25,7 +25,9 @@ export class Car {
   get wrecked() { return this.health <= 0; }
   // golpe: abolla la carrocería cerca del punto de impacto (coordenadas locales sin escalar) y resta vida
   damage(amount, lx, lz) {
-    if (amount <= 0) return;
+    // un mismo golpe toca varios puntos de contacto durante unos fotogramas: solo cuenta una vez
+    const now = performance.now(); if (amount <= 0 || now - (this.lastHit || 0) < 500) return;
+    this.lastHit = now;
     this.health = Math.max(0, this.health - amount);
     const dent = Math.min(0.25, amount * 0.012), body = this.mesh.userData.body, v = new THREE.Vector3();
     body.traverse(m => {
@@ -90,7 +92,8 @@ export class Car {
       this.#orient(dt); this.#spin(dt); this.#fx(dt); return;
     }
     if (input) {
-      const a0 = input.axes(), a = this.wrecked ? { x: a0.x, y: 0 } : a0; // averiado: no tira
+      // el motor pierde fuerza poco a poco con los daños; solo deja de tirar del todo al 100 %
+      const a0 = input.axes(), power = this.wrecked ? 0 : 0.45 + 0.55 * this.health / 100, a = { x: a0.x, y: a0.y > 0 ? a0.y * power : a0.y * (this.wrecked ? 0 : 1) };
       const maxSteer = 0.6 / (1 + Math.abs(this.speed) / 12);
       this.steer += (a.x * maxSteer - this.steer) * Math.min(1, dt * 6);
       const throttle = a.y;
@@ -122,13 +125,13 @@ export class Car {
           hitAt = hitAt || localHit(this, p.x - hit.x * 0.95 * this.s, p.z - hit.z * 0.95 * this.s);
         }
       }
-      if (hitAt && v0 > 2.5 && this.driver) this.damage((v0 - 2.5) * 5, hitAt[0], hitAt[1]);
+      if (hitAt && v0 > 3 && this.driver) this.damage((v0 - 3) * 1.6, hitAt[0], hitAt[1]);
       for (const c of cars) if (c !== this) {
         for (const [cx, cz] of this.circles()) for (const [ox, oz] of c.circles()) {
           const dx = cx - ox, dz = cz - oz, d = Math.hypot(dx, dz);
           const D = 0.95 * (this.s + c.s); if (d < D && d > 1e-6) {
             const rel = Math.abs(this.speed - c.speed * (f2x * Math.sin(c.heading) + f2z * Math.cos(c.heading)));
-            if (rel > 2.5 && !bumped) { const dmg = (rel - 2.5) * 5; this.damage(dmg, ...localHit(this, ox, oz)); c.damage(dmg, ...localHit(c, cx, cz)); if (c.ai) c.ai.wait = -3; }
+            if (rel > 3 && !bumped) { const dmg = (rel - 3) * 1.6; this.damage(dmg, ...localHit(this, ox, oz)); c.damage(dmg, ...localHit(c, cx, cz)); if (c.ai) c.ai.wait = -3; }
             const push = (D - d) / 2; this.pos.x += dx / d * push; this.pos.z += dz / d * push; c.pos.x -= dx / d * push; c.pos.z -= dz / d * push; c.speed += this.speed * 0.1; bumped = true; }
         }
       }
