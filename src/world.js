@@ -45,6 +45,19 @@ export class Colliders {
     }
     return best;
   }
+  // Punto más cercano de una pared de edificio a (x, z), con la normal que apunta hacia (x, z)
+  nearest(x, z, maxD, kind = 'building') {
+    const c = this.cell; let best = null, bd = maxD;
+    for (let i = Math.floor((x - maxD) / c); i <= Math.floor((x + maxD) / c); i++) for (let j = Math.floor((z - maxD) / c); j <= Math.floor((z + maxD) / c); j++) {
+      for (const s of this.map.get(this.key(i, j)) || []) {
+        if (s.kind !== kind) continue;
+        const dx = s.bx - s.ax, dz = s.bz - s.az, L = dx * dx + dz * dz || 1e-9;
+        const t = Math.max(0.15, Math.min(0.85, ((x - s.ax) * dx + (z - s.az) * dz) / L)), qx = s.ax + dx * t, qz = s.az + dz * t, d = Math.hypot(x - qx, z - qz);
+        if (d < bd && d > 0.05) { bd = d; best = { x: qx, z: qz, nx: (x - qx) / d, nz: (z - qz) / d }; }
+      }
+    }
+    return best;
+  }
   // Empuja un círculo fuera de los segmentos cercanos. Devuelve la normal acumulada (o null).
   resolve(pos, r) {
     const c = this.cell, seen = new Set(); let hit = null;
@@ -268,7 +281,7 @@ export function buildBuildings(data, terrain, tex, colliders) {
   return group;
 }
 
-// Espadaña (campanario de muro típico de Zamora), portada, campanas y crucero en la plaza
+// Espadaña (campanario de muro típico de Zamora), portada y campanas
 function buildChurchDetails(c, terrain, tex, colliders) {
   const group = new THREE.Group();
   const stoneTex = tex.ashlar.clone(); stoneTex.needsUpdate = true; stoneTex.repeat.set(0.25, 1 / 3);
@@ -313,24 +326,26 @@ function buildChurchDetails(c, terrain, tex, colliders) {
   frame.position.set(0, by0, zf + dirOut * 0.01); door.position.set(0, by0, zf + dirOut * 0.03);
   if (dirOut < 0) frame.rotation.y = door.rotation.y = Math.PI;
   esp.add(frame, door);
-  // crucero de granito en la plaza (al sur del templo)
-  let sx = 0, sz = 0; for (const p of c.pts) { sx += p[0]; sz += p[1]; } sx /= c.pts.length; sz /= c.pts.length;
-  const px = sx + 6, pz = Math.max(...c.pts.map(p => p[1])) + 10, py = terrain.height(px, pz);
-  const cru = new THREE.Group(); cru.position.set(px, py, pz);
-  [[2.4, 0.3], [1.8, 0.3], [1.2, 0.3]].forEach(([s, h], i) => { const m = new THREE.Mesh(new THREE.BoxGeometry(s, h, s), stoneMat); m.position.y = h / 2 + i * h - 0.1; m.castShadow = m.receiveShadow = true; cru.add(m); });
-  const col = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 3.2, 10), stoneMat); col.position.y = 0.8 + 1.6; col.castShadow = true; cru.add(col);
-  const crV = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.1, 0.2), stoneMat); crV.position.y = 4.3; crV.castShadow = true; cru.add(crV);
-  const crH = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.2, 0.2), stoneMat); crH.position.y = 4.5; crH.castShadow = true; cru.add(crH);
-  group.add(cru);
-  colliders.addPolygon([[px - 1.2, pz - 1.2], [px + 1.2, pz - 1.2], [px + 1.2, pz + 1.2], [px - 1.2, pz + 1.2]], 'wall');
-  // bancos de piedra junto al crucero
-  for (const s of [-1, 1]) {
-    const bx = px + s * 3.4, bz = pz, bench = new THREE.Group(); bench.position.set(bx, terrain.height(bx, bz), bz); bench.rotation.y = Math.PI / 2;
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.12, 0.45), stoneMat); seat.position.y = 0.45; seat.castShadow = true; bench.add(seat);
-    for (const k of [-0.7, 0.7]) { const l = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.45, 0.4), stoneMat); l.position.set(k, 0.22, 0); bench.add(l); }
+  return group;
+}
+
+// Bancos de la plaza (madera sobre patas de hierro). data.plaza.benches = [[x, z, rumbo°], ...]: rumbo = hacia dónde mira quien se sienta
+export function buildPlaza(data, terrain, colliders) {
+  const group = new THREE.Group(), P = data.plaza; if (!P) return group;
+  const wood = new THREE.MeshStandardMaterial({ color: 0x7a5232, roughness: 0.85 }), iron = new THREE.MeshStandardMaterial({ color: 0x232323, metalness: 0.6, roughness: 0.5 });
+  for (const [x, z, deg] of P.benches || []) {
+    const a = THREE.MathUtils.degToRad(deg), bench = new THREE.Group();
+    bench.position.set(x, terrain.height(x, z), z); bench.rotation.y = Math.atan2(Math.sin(a), -Math.cos(a)); // 0° = norte
+    for (let k = 0; k < 3; k++) { const s = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.04, 0.12), wood); s.position.set(0, 0.45, 0.16 - k * 0.15); s.castShadow = true; bench.add(s); }
+    for (let k = 0; k < 2; k++) { const s = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.11, 0.035), wood); s.position.set(0, 0.62 + k * 0.16, -0.2); s.rotation.x = -0.15; s.castShadow = true; bench.add(s); }
+    for (const sx of [-0.75, 0.75]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.45, 0.45), iron); leg.position.set(sx, 0.22, 0); bench.add(leg);
+      const back = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.45, 0.05), iron); back.position.set(sx, 0.68, -0.21); bench.add(back);
+    }
     group.add(bench);
+    const fx = Math.sin(a), fz = -Math.cos(a), rx = -fz, rz = fx; // frente y lado (en planta)
+    colliders.addSegment(x - rx * 0.9, z - rz * 0.9, x + rx * 0.9, z + rz * 0.9, 'wall');
   }
-  group.userData.plaza = [px, pz];
   return group;
 }
 
@@ -374,19 +389,22 @@ export function buildRoads(data, terrain, tex, colliders) {
       dist += L;
     }
   }
-  // pueblo: farolas de brazo cada ~30 m; si caen dentro de una casa se pegan a su fachada
-  if (!urban) for (const r of data.roads) {
-    if (!STREET.has(r.k) || r.k === 'trunk') continue;
-    const P = densify(r.p, 2.5); let dist = 0, n = 0;
-    for (let i = 0; i < P.length - 1; i++) {
-      const a = P[i], b = P[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      if (Math.floor((dist + L) / 30) > Math.floor(dist / 30)) {
-        const na = sideNormal(P, i), side = n++ % 2 ? 1 : -1, o = r.w / 2 + 0.35;
-        const q = { x: a[0] + na[0] * o * side, z: a[1] + na[1] * o * side };
-        if (colliders) colliders.resolve(q, 0.25);
-        if (!lamps.some(l => Math.hypot(l[0] - q.x, l[1] - q.z) < 14)) lamps.push([q.x, q.z, Math.atan2(-na[0] * side, -na[1] * side)]);
+  // pueblo: faroles colgados de las fachadas, casi todos en el centro (alrededor de la plaza)
+  if (!urban && colliders) {
+    const [cx, cz] = data.plaza?.start || data.spawn;
+    for (const r of data.roads) {
+      if (!STREET.has(r.k) || r.k === 'trunk') continue;
+      const P = densify(r.p, 2.5); let dist = 0, next = 0;
+      for (let i = 0; i < P.length - 1; i++) {
+        const a = P[i], b = P[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]), dc = Math.hypot(a[0] - cx, a[1] - cz);
+        if (dist >= next && dc < 320) {
+          const w = colliders.nearest(a[0], a[1], r.w / 2 + 4);
+          if (w && !lamps.some(l => Math.hypot(l[0] - w.x, l[1] - w.z) < (dc < 140 ? 22 : 60))) {
+            lamps.push([w.x + w.nx * 0.03, w.z + w.nz * 0.03, Math.atan2(w.nx, w.nz)]); next = dist + (dc < 140 ? 30 : 75);
+          }
+        }
+        dist += L;
       }
-      dist += L;
     }
   }
   for (const r of data.roads) {
@@ -427,12 +445,22 @@ export function buildRoads(data, terrain, tex, colliders) {
     }
   }
   if (lamps.length) {
-    const H = urban ? 6 : 4.6;
-    const pole = new THREE.CylinderGeometry(0.06, 0.09, H, 6); pole.translate(0, H / 2, 0);
-    const arm = new THREE.BoxGeometry(0.08, 0.08, 1.2); arm.translate(0, H - 0.05, 0.55);
-    const g = mergeGeometries([pole, arm]);
-    const head = urban ? new THREE.BoxGeometry(0.3, 0.12, 0.55) : new THREE.CylinderGeometry(0.12, 0.2, 0.42, 6);
-    head.translate(0, H - 0.25, 1.1);
+    let H, g, head, reach;
+    if (urban) {
+      H = 6; reach = 1.1;
+      const pole = new THREE.CylinderGeometry(0.06, 0.09, H, 6); pole.translate(0, H / 2, 0);
+      const arm = new THREE.BoxGeometry(0.08, 0.08, 1.2); arm.translate(0, H - 0.05, 0.55);
+      g = mergeGeometries([pole, arm]);
+      head = new THREE.BoxGeometry(0.3, 0.12, 0.55); head.translate(0, H - 0.25, 1.1);
+    } else { // farol de brazo de forja anclado a la pared, con tejadillo
+      H = 3.9; reach = 0.7;
+      const plate = new THREE.BoxGeometry(0.16, 0.3, 0.04); plate.translate(0, H - 0.1, 0.02);
+      const arm = new THREE.BoxGeometry(0.04, 0.04, 0.72); arm.translate(0, H, 0.36);
+      const brace = new THREE.BoxGeometry(0.03, 0.03, 0.5); brace.rotateX(0.75); brace.translate(0, H - 0.18, 0.2);
+      const cap = new THREE.ConeGeometry(0.2, 0.18, 4); cap.rotateY(Math.PI / 4); cap.translate(0, H - 0.12, reach);
+      g = mergeGeometries([plate, arm, brace, cap].map(x => x.index ? x.toNonIndexed() : x));
+      head = new THREE.CylinderGeometry(0.15, 0.1, 0.32, 4); head.rotateY(Math.PI / 4); head.translate(0, H - 0.37, reach);
+    }
     const im = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({ color: urban ? 0x4a5056 : 0x26282a, roughness: 0.5, metalness: 0.6 }), lamps.length);
     const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff4d8, emissive: 0xffc870, emissiveIntensity: 0, roughness: 0.3 });
     night.lamps.push(lampMat);
@@ -440,8 +468,8 @@ export function buildRoads(data, terrain, tex, colliders) {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3();
     lamps.forEach(([x, z, rot], i) => {
       q.setFromAxisAngle(up, rot); const y = terrain.height(x, z); m.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(1, 1, 1)); im.setMatrixAt(i, m); ih.setMatrixAt(i, m);
-      v.set(0, 0, 1.1).applyQuaternion(q); lamps[i] = [x, z, rot, x + v.x, y + H - 0.45, z + v.z]; // posición de la bombilla
-      if (colliders) colliders.addSegment(x - 0.12, z, x + 0.12, z, 'tree');
+      v.set(0, 0, reach).applyQuaternion(q); lamps[i] = [x, z, rot, x + v.x, y + H - 0.5, z + v.z]; // posición de la bombilla
+      if (colliders && urban) colliders.addSegment(x - 0.12, z, x + 0.12, z, 'tree');
     });
     im.castShadow = true; group.add(im, ih); group.userData.lamps = lamps;
   }

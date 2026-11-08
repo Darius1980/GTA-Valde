@@ -285,6 +285,6 @@ if not clear(spawn, 1):
         if clear(cand, 1): spawn = cand; break
 
 world = {"name": NAME, "title": CFG["title"], "style": CFG.get("style", "rural"), "carScale": CFG.get("car_scale", 1), "personScale": CFG.get("person_scale", 1), "terrain": terrain, "ortho": ortho, "buildings": buildings, "roads": roads, "walls": walls,
-         "trees": trees, "cars": cars, "spawn": spawn, "church": CFG.get("church")}
+         "trees": trees, "cars": cars, "spawn": spawn, "church": CFG.get("church"), "plaza": CFG.get("plaza"), "race_start": CFG.get("race_start")}
 json.dump(world, open(os.path.join(OUT, "world.json"), "w"), separators=(",", ":"))
 print("world.json", os.path.getsize(os.path.join(OUT, "world.json")) // 1024, "KB")

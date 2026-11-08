@@ -2,13 +2,14 @@ import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { Input } from './input.js';
 import { makeTextures } from './textures.js';
-import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, Trees } from './world.js';
+import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, buildPlaza, Trees } from './world.js';
 import { Player } from './player.js';
 import { Car } from './car.js';
 import { Minimap, EngineSound } from './hud.js';
 import { DayNight } from './daynight.js';
 import { RoadNet, Driver, Walker } from './traffic.js';
 import { Missions, deliveryPoints } from './missions.js';
+import { Race } from './race.js';
 
 const isMobile = matchMedia('(pointer: coarse)').matches;
 const canvas = document.getElementById('game');
@@ -54,12 +55,12 @@ async function load(map) {
   scene.add(buildTerrain(meta, terrain, oFull, oCenter, tex));
   const colliders = new Colliders();
   const buildings = buildBuildings(data, terrain, tex, colliders); scene.add(buildings);
+  scene.add(buildPlaza(data, terrain, colliders));
   const roads = buildRoads(data, terrain, tex, colliders); scene.add(roads);
-  const plaza = buildings.children.find(c => c.userData.plaza)?.userData.plaza;
   scene.add(buildWalls(data, terrain, tex, colliders));
   const trees = new Trees(data, terrain, tex, colliders); scene.add(trees.group);
   progress(0.95, 'Últimos detalles…');
-  return { data, terrain, colliders, trees, oFull, lamps: roads.userData.lamps, plaza };
+  return { data, terrain, colliders, trees, oFull, lamps: roads.userData.lamps };
 }
 
 const input = new Input(canvas);
@@ -80,7 +81,7 @@ function waitForMap() {
 }
 const hud = { mode: document.getElementById('mode'), speed: document.getElementById('speed'), hint: document.getElementById('hint'), place: document.getElementById('place') };
 
-waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull, lamps, plaza }) => {
+waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull, lamps }) => {
   const world = { terrain, colliders, scene, personScale: data.personScale || 1 };
   const player = new Player(world); scene.add(player.mesh);
   player.pos.set(data.spawn[0], terrain.height(data.spawn[0], data.spawn[1]), data.spawn[1]);
@@ -108,13 +109,21 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   const headlight = new THREE.SpotLight(0xfff2d0, 0, 55, 0.55, 0.5, 1.2); headlight.position.set(0, 0.8, 2.2); headlight.target.position.set(0, 0, 14);
   headlight.add(headlight.target); scene.add(headlight);
   // misiones de reparto
-  const start = plaza ? [plaza[0], plaza[1] + 4.5] : [data.spawn[0] + 4, data.spawn[1]];
+  const start = data.plaza?.start || [data.spawn[0] + 4, data.spawn[1]];
   const ui = { mission: document.getElementById('mission'), money: document.getElementById('money'), toast: document.getElementById('toast') };
   const streets = data.roads.filter(r => r.k !== 'track' && r.k !== 'path').map(r => r.p);
   const minimap = new Minimap(document.getElementById('minimap'), oFull.image, data.ortho.full.bounds, streets);
   const engine = new EngineSound();
   const missions = new Missions({ scene, terrain, start, drops: deliveryPoints(data), ui, sound: k => engine.blip(k) });
   const clockEl = document.getElementById('clock');
+  const race = new Race({
+    scene, world, net, start: data.race_start || [data.spawn[0] + 20, data.spawn[1] + 10], ui, sound: k => engine.blip(k), toast: (a, b) => missions.toast(a, b),
+    makeCar: (col) => { const c = new Car(world, col, 'sedan', data.carScale || 1); scene.add(c.mesh); cars.push(c); return c; },
+  });
+  race.onRemove = (c) => { scene.remove(c.mesh); for (const sp of c.smoke) scene.remove(sp); const i = cars.indexOf(c); if (i >= 0 && c !== driving) cars.splice(i, 1); };
+  race.onPrize = (p) => { missions.money += p; };
+  race.onStart = (c) => { camState.yaw = c.heading + Math.PI; camState.pitch = 0.18; camera.position.set(c.pos.x - Math.sin(c.heading) * 7, c.pos.y + 3, c.pos.z - Math.cos(c.heading) * 7); };
+  missions.busy = () => race.active; race.busy = () => missions.state === 'deliver';
   clockEl.textContent = '☀️ ' + dayNight.clock;
   clockEl.addEventListener('click', () => dayNight.skip(1)); clockEl.addEventListener('touchstart', e => { dayNight.skip(1); e.stopPropagation(); }, { passive: true });
   for (const ev of ['keydown', 'touchstart', 'mousedown']) addEventListener(ev, () => engine.start(), { once: true });
@@ -139,7 +148,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
       if (driving) { driving.driver = false; player.exitCar(driving); driving = null; scene.add(headlight); }
       else {
         let best = null, bd = 4.5;
-        for (const c of cars) { const d = c.pos.distanceTo(player.pos) - 2.2 * (1 - c.s); if (d < bd) { bd = d; best = c; } }
+        for (const c of cars) { if (c.racer) continue; const d = c.pos.distanceTo(player.pos) - 2.2 * (1 - c.s); if (d < bd) { bd = d; best = c; } }
         if (best) { driving = best; best.driver = true; best.ai = null; best.mesh.add(headlight); player.enterCar(best); camState.yaw = best.heading + Math.PI; camState.pitch = 0.18; }
       }
     }
@@ -149,7 +158,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     for (const c of cars) if (c !== driving) {
       c.update(dt, null);
       // los coches que llegan a un callejón sin salida o al borde del mapa reaparecen lejos del jugador
-      if (c.ai?.f.deadEnd && c.pos.distanceTo(player.inCar ? driving.pos : player.pos) > 90) aiSpawn(c);
+      if (c.ai?.f?.deadEnd && c.pos.distanceTo(player.inCar ? driving.pos : player.pos) > 90) aiSpawn(c);
     }
     const focus = driving ? driving.pos : player.pos;
     for (const w of walkers) w.update(dt, cars, player, focus);
@@ -176,23 +185,24 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     for (const c of cars) c.setLights(c.ai || c === driving ? nf : 0, c === driving ? input.brake || (input.axes().y < 0 && driving.speed > 0.5) : c.ai && c.speed < 1);
     headlight.intensity = driving ? 60 * nf : 0;
     missions.update(dt, target);
+    race.update(dt, driving, target);
     // la sombra sigue al jugador
     sun.position.copy(target).addScaledVector(dayNight.light, 200); sun.target.position.copy(target);
 
     engine.update(!!driving, driving ? driving.speed : 0, driving ? input.axes().y : 0);
-    if ((frameNo++ & 1) === 0) minimap.draw(target.x, target.z, driving ? driving.heading : player.heading, camState.yaw, cars, driving, { walkers, target: missions.target, targetColor: missions.state === 'deliver' ? '#47d16c' : '#f5c542' });
+    if ((frameNo++ & 1) === 0) minimap.draw(target.x, target.z, driving ? driving.heading : player.heading, camState.yaw, cars, driving, { walkers, target: race.target || missions.target, targetColor: race.target ? '#3aa0e2' : missions.state === 'deliver' ? '#47d16c' : '#f5c542' });
     camera.fov += ((driving ? 60 + Math.min(15, Math.abs(driving.speed) * 0.5) : 60) - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix();
-    hud.mode.textContent = driving ? 'Conduciendo' : 'A pie';
+    hud.mode.textContent = driving ? `Conduciendo · ${driving.wrecked ? 'averiado' : `daños ${Math.round(100 - driving.health)} %`}` : 'A pie';
     if ((frameNo & 15) === 0) clockEl.textContent = (dayNight.n > 0.5 ? '🌙 ' : '☀️ ') + dayNight.clock;
     hud.speed.textContent = driving ? `${Math.round(Math.abs(driving.speed) * 3.6)} km/h` : '';
     const near = !driving && cars.some(c => c.pos.distanceTo(player.pos) < 4.5);
-    hud.hint.textContent = driving ? (input.touch ? 'Pulsa 🚪 para bajar' : 'E para bajar') : near ? (input.touch ? 'Pulsa 🚪 para subir al coche' : 'E para subir al coche') : '';
+    hud.hint.textContent = race.nearOnFoot ? 'Necesitas un coche para la carrera' : driving?.wrecked ? 'Coche averiado: bájate y coge otro' : driving ? (input.touch ? 'Pulsa 🚪 para bajar' : 'E para bajar') : near ? (input.touch ? 'Pulsa 🚪 para subir al coche' : 'E para subir al coche') : '';
     document.body.classList.toggle('driving', !!driving);
     input.endFrame();
     renderer.render(scene, camera);
     requestAnimationFrame(frame);
   }
-  window.__game = { player, cars, walkers, camera, scene, renderer, terrain, dayNight, missions, get driving() { return driving; } };
+  window.__game = { player, cars, walkers, race, camera, scene, renderer, terrain, dayNight, missions, get driving() { return driving; } };
   frame();
 }).catch(e => { console.error(e); document.getElementById('lmsg').textContent = 'Error cargando: ' + e.message; });
 

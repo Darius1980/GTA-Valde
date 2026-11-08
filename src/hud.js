@@ -34,7 +34,7 @@ export class Minimap {
       g.beginPath(); g.arc(x, y, 6, 0, 7); g.fill(); g.stroke();
     }
     // jugador
-    g.rotate(Math.PI - heading - camYaw);
+    g.rotate(Math.PI - heading); // el lienzo ya está girado con la cámara
     g.fillStyle = '#f5c542'; g.strokeStyle = '#000'; g.lineWidth = 1.5;
     g.beginPath(); g.moveTo(0, -8); g.lineTo(6, 6); g.lineTo(0, 3); g.lineTo(-6, 6); g.closePath(); g.fill(); g.stroke();
     g.restore();

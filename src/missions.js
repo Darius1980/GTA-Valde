@@ -1,7 +1,7 @@
 // Misiones de reparto: recoge el pan en la plaza y llévalo a las casas antes de que se acabe el tiempo.
 import * as THREE from 'three';
 
-function beam(color) {
+export function beam(color) {
   const g = new THREE.Group();
   const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide, fog: false, blending: THREE.AdditiveBlending });
   const col = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 40, 24, 1, true), mat); col.position.y = 20; g.add(col);
@@ -43,9 +43,11 @@ export class Missions {
     for (const m of [this.startMarker, this.dropMarker]) if (m.visible) {
       m.userData.col.material.opacity = 0.22 + 0.1 * Math.sin(t * 3); m.userData.ring.scale.setScalar(1 + 0.15 * Math.sin(t * 4));
     }
-    if (this.cool > 0) { this.cool -= dt; if (this.cool <= 0 && this.state === 'idle') this.startMarker.visible = true; }
+    if (this.cool > 0) this.cool -= dt;
+    if (this.state === 'idle') this.startMarker.visible = this.cool <= 0 && !this.busy?.();
     const near = (m) => m.visible && Math.hypot(pos.x - m.userData.at[0], pos.z - m.userData.at[1]) < 3.2;
-    if (this.state === 'idle' && this.cool <= 0 && near(this.startMarker)) this.begin([pos.x, pos.z]);
+    this.startMarker.visible = this.startMarker.visible && !this.busy?.();
+    if (this.state === 'idle' && this.cool <= 0 && !this.busy?.() && near(this.startMarker)) this.begin([pos.x, pos.z]);
     else if (this.state === 'deliver') {
       this.time -= dt;
       if (near(this.dropMarker)) {
