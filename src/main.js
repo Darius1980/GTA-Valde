@@ -65,6 +65,23 @@ async function load(map) {
 
 const input = new Input(canvas);
 
+// Pantalla completa (y horizontal en móvil) con el botón ⛶
+{
+  const fs = document.getElementById('fs'), el = document.documentElement;
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (!req || !(document.fullscreenEnabled || document.webkitFullscreenEnabled)) fs.hidden = true;
+  const toggle = async (e) => {
+    e.preventDefault(); e.stopPropagation();
+    try {
+      if (document.fullscreenElement || document.webkitFullscreenElement) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      else { await req.call(el, { navigationUI: 'hide' }); await screen.orientation?.lock?.('landscape').catch(() => {}); }
+    } catch (_) {}
+  };
+  fs.addEventListener('click', toggle); fs.addEventListener('touchend', toggle);
+  const upd = () => { fs.textContent = document.fullscreenElement || document.webkitFullscreenElement ? '✕' : '⛶'; };
+  document.addEventListener('fullscreenchange', upd); document.addEventListener('webkitfullscreenchange', upd);
+}
+
 // Selección de mapa: por enlace (#valde) o con los botones de la portada (si hay varios)
 function waitForMap() {
   const maps = ['valde'];

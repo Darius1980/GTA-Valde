@@ -58,3 +58,7 @@ body.touch #hud { right: 140px; }
 #toast b { font: 900 clamp(26px, 6vw, 40px)/1.1 Impact, "Arial Black", sans-serif; color: #f5c542; letter-spacing: 1px; }
 #toast span { font-size: 15px; }
 body.touch #mission { top: auto; bottom: calc(max(28px, env(safe-area-inset-bottom)) + 150px); font-size: 13px; }
+
+#fs { position: fixed; z-index: 5; left: 50%; transform: translateX(-50%); bottom: max(10px, env(safe-area-inset-bottom)); width: 44px; height: 44px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.5); background: rgba(0,0,0,.4); color: #fff; font-size: 22px; line-height: 1; cursor: pointer; }
+#fs[hidden] { display: none; }
