@@ -6,7 +6,7 @@ export class Minimap {
     const dpr = Math.min(2, devicePixelRatio); this.size = el.clientWidth || 150;
     el.width = el.height = this.size * dpr; this.g.scale(dpr, dpr);
   }
-  draw(px, pz, heading, camYaw, cars, driving) {
+  draw(px, pz, heading, camYaw, cars, driving, extra = {}) {
     const g = this.g, S = this.size, r = S / 2, k = r / this.radius;
     const [x0, , x1] = this.b, iw = this.img.width, mpp = (x1 - x0) / iw;
     g.save(); g.clearRect(0, 0, S, S);
@@ -23,6 +23,15 @@ export class Minimap {
     for (const s of this.streets) { g.beginPath(); s.forEach(([x, z], i) => i ? g.lineTo((x - px) * k, (z - pz) * k) : g.moveTo((x - px) * k, (z - pz) * k)); g.stroke(); }
     for (const c of cars) if (c !== driving) {
       g.fillStyle = '#4fb3ff'; g.beginPath(); g.arc((c.pos.x - px) * k, (c.pos.z - pz) * k, 3.5, 0, 7); g.fill();
+    }
+    g.fillStyle = 'rgba(255,255,255,0.85)';
+    for (const w of extra.walkers || []) { const x = (w.pos.x - px) * k, y = (w.pos.z - pz) * k; if (x * x + y * y < r * r) g.fillRect(x - 1.5, y - 1.5, 3, 3); }
+    // objetivo de la misión (en el borde si está lejos)
+    if (extra.target) {
+      let x = (extra.target[0] - px) * k, y = (extra.target[1] - pz) * k; const d = Math.hypot(x, y), lim = r - 9;
+      if (d > lim) { x *= lim / d; y *= lim / d; }
+      g.fillStyle = extra.targetColor || '#f5c542'; g.strokeStyle = '#000'; g.lineWidth = 1.5;
+      g.beginPath(); g.arc(x, y, 6, 0, 7); g.fill(); g.stroke();
     }
     // jugador
     g.rotate(Math.PI - heading - camYaw);
@@ -47,6 +56,15 @@ export class EngineSound {
       o1.connect(f); o2.connect(f); f.connect(gn); gn.connect(this.ctx.destination); o1.start(); o2.start();
       Object.assign(this, { o1, o2, f, gn });
     } catch (e) { this.ctx = null; }
+  }
+  blip(kind) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, notes = kind === 'ok' ? [660, 880, 1320] : [440, 330, 220];
+    notes.forEach((f, i) => {
+      const o = this.ctx.createOscillator(), g = this.ctx.createGain(); o.type = 'triangle'; o.frequency.value = f;
+      g.gain.setValueAtTime(0, t + i * 0.1); g.gain.linearRampToValueAtTime(0.12, t + i * 0.1 + 0.02); g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.1 + 0.25);
+      o.connect(g); g.connect(this.ctx.destination); o.start(t + i * 0.1); o.stop(t + i * 0.1 + 0.3);
+    });
   }
   update(on, speed, throttle) {
     if (!this.ctx) return;

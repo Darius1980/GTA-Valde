@@ -149,7 +149,7 @@ export function makeCar(color = 0xb7beca, kind = 'sedan') {
   // sombra de contacto suave
   const sh = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 4.6), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false, alphaMap: contactShadow() }));
   sh.rotation.x = -Math.PI / 2; sh.position.y = 0.03; root.add(sh);
-  root.userData = { wheels, body };
+  root.userData = { wheels, body, lightMat: light, rearMat: rear };
   return root;
 }
 

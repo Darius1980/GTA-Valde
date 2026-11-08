@@ -79,6 +79,26 @@ export function makeTextures(renderer) {
     if (name === 'facadePlasterGround') { g.fillStyle = 'rgba(80,60,40,0.25)'; g.fillRect(0, 330, 512, 54); } // zócalo manchado
     openFn(g, r);
     out[name] = tex(c);
+    // mapa de luz nocturna: solo el cristal de las ventanas (el shader enciende unas sí y otras no)
+    const [ce, ge] = canvas(128, 96); ge.fillStyle = '#000'; ge.fillRect(0, 0, 128, 96);
+    const glow = (x, y, w, h) => { const gr = ge.createRadialGradient((x + w / 2) / 4, (y + h / 2) / 4, 2, (x + w / 2) / 4, (y + h / 2) / 4, h / 5);
+      gr.addColorStop(0, '#ffd890'); gr.addColorStop(1, '#c87a30'); ge.fillStyle = gr; ge.fillRect(x / 4, y / 4, w / 4, h / 4); };
+    if (openFn === upper) glow(70, 115, 115, 154);
+    glow(327, 115, 115, 154);
+    out[name + 'Night'] = tex(ce);
+  }
+  // Sillería de granito (iglesia)
+  {
+    const [c, g] = canvas(512, 384); const r = rng(51);
+    g.fillStyle = '#8e8573'; g.fillRect(0, 0, 512, 384);
+    for (let y = 0; y < 384; y += 48) for (let x = (y / 48) % 2 ? -50 : 0; x < 512; x += 100) {
+      const v = (r() - 0.5) * 26, w = 96;
+      g.fillStyle = `rgb(${172 + v | 0},${160 + v | 0},${138 + v | 0})`; g.fillRect(x + 2, y + 2, w, 44);
+      for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(${r() < .5 ? 60 : 230},${r() < .5 ? 60 : 220},${r() < .5 ? 50 : 200},0.12)`; g.fillRect(x + 2 + r() * w, y + 2 + r() * 42, 2 + r() * 4, 2 + r() * 3); }
+      g.fillStyle = 'rgba(0,0,0,0.12)'; g.fillRect(x + 2, y + 40, w, 6);
+      if (r() < 0.2) { g.fillStyle = 'rgba(70,80,50,0.18)'; g.fillRect(x + 2, y + 2, w, 44); } // líquenes
+    }
+    out.ashlar = tex(c);
   }
   // Piedra lisa (pajares, corrales, muros)
   {

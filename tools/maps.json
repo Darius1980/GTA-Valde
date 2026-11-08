@@ -8,6 +8,7 @@
   "catastro": true,
   "car_scale": 0.7,
   "person_scale": 0.88,
-  "road_scale": 0.8
+  "road_scale": 0.8,
+  "church": "1199001QG3419N"
  }
 }

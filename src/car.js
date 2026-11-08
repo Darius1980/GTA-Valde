@@ -19,8 +19,18 @@ export class Car {
       if (d < R && d > 1e-6) { p.x = cx + dx / d * R; p.z = cz + dz / d * R; }
     }
   }
+  // faros: n = cuánto es de noche (0..1)
+  setLights(n, braking = false) {
+    const u = this.mesh.userData;
+    u.lightMat.emissiveIntensity = 0.5 + 4 * n;
+    u.rearMat.emissiveIntensity = (braking ? 3 : 0.6) + 1.5 * n;
+  }
   update(dt, input) {
     const { colliders, terrain, cars } = this.world;
+    if (this.ai && !this.driver) { // conducido por la IA del tráfico
+      this.ai.update(dt, this.world.obstacles || []);
+      this.#orient(dt); this.#spin(dt); return;
+    }
     if (input) {
       const a = input.axes();
       const maxSteer = 0.6 / (1 + Math.abs(this.speed) / 12);
@@ -60,7 +70,9 @@ export class Car {
       this.#orient(dt);
       this.settled = true;
     }
-    // ruedas
+    this.#spin(dt);
+  }
+  #spin(dt) {
     for (const w of this.mesh.userData.wheels) {
       w.spin.rotation.x += this.speed * dt / (w.R * this.s);
       if (w.front) w.pivot.rotation.y = -this.steer;

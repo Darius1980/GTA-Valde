@@ -73,6 +73,23 @@ export class Colliders {
   }
 }
 
+// Materiales que se encienden de noche (los controla daynight.js)
+export const night = { windows: [], lamps: [] };
+function litWindows(mat, emap) {
+  mat.emissive = new THREE.Color(0xffffff); mat.emissiveMap = emap; mat.emissiveIntensity = 0;
+  mat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vLitPos;')
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvLitPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    // cada ventana (celda de 2 m x 3 m) se enciende o no según un hash de su posición
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vLitPos;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      { vec3 cell = floor(vec3(vLitPos.x / 2.0, vLitPos.y / 3.0, vLitPos.z / 2.0));
+        totalEmissiveRadiance *= step(0.62, fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453)); }`);
+  };
+  mat.customProgramCacheKey = () => 'litwindows';
+  night.windows.push(mat); return mat;
+}
+
 // ---------- utilidades de geometría ----------
 function signedArea(p) { let a = 0; for (let i = 0; i < p.length; i++) { const q = p[(i + 1) % p.length]; a += p[i][0] * q[1] - q[0] * p[i][1]; } return a / 2; }
 
@@ -126,6 +143,7 @@ export function buildBuildings(data, terrain, tex, colliders) {
   const urban = data.style === 'urban';
   const facade = new GeoBuilder(), plaster = new GeoBuilder(), facadeGround = new GeoBuilder(), plasterGround = new GeoBuilder(), stone = new GeoBuilder(), roof = new GeoBuilder(), eaves = new GeoBuilder(), flat = new GeoBuilder();
   const urbanB = (tex.urban || []).map(() => new GeoBuilder()), groundB = (tex.urbanGround || []).map(() => new GeoBuilder());
+  const ashlar = new GeoBuilder(); let church = null;
   let seed = 1; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   for (const b of data.buildings) {
     let pts = b.p.slice(); if (signedArea(pts) > 0) pts.reverse(); // orden que deja la normal de los muros hacia fuera
@@ -134,12 +152,13 @@ export function buildBuildings(data, terrain, tex, colliders) {
     for (const p of pts) { const h = terrain.height(p[0], p[1]); base = Math.min(base, h); top = Math.max(top, h); }
     const floors = Math.max(1, b.f || 1);
     const floorH = urban ? 2.85 : 2.9;
-    let eave = b.eave != null ? Math.max(b.eave, top + 2.4) : top + (b.use === 'agr' ? 3.2 + 0.6 * rnd() : floors * floorH + (urban ? 1.2 : 0.3));
+    const isChurch = data.church && b.id === data.church && Math.abs(signedArea(pts)) > 100;
+    let eave = isChurch ? top + 7.5 : b.eave != null ? Math.max(b.eave, top + 2.4) : top + (b.use === 'agr' ? 3.2 + 0.6 * rnd() : floors * floorH + (urban ? 1.2 : 0.3));
     const y0 = base - 0.6;
     const ob = obb(pts); if (!ob) continue;
     const width = ob.mxv - ob.mnv, length = ob.mxu - ob.mnu;
     let rx = ob.ux, rz = ob.uz, mid = (ob.mnv + ob.mxv) / 2, half = width / 2;
-    if (width > length) { rx = -ob.uz; rz = ob.ux; mid = (ob.mnu + ob.mxu) / 2; half = length / 2; }
+    if (width > length) { rx = -ob.uz; rz = ob.ux; mid = -(ob.mnu + ob.mxu) / 2; half = length / 2; } // la normal (-rz, rx) es -u
     const nx = -rz, nz = rx;
     const isFlat = b.flat === true;
     let slope = 0.32;
@@ -147,13 +166,14 @@ export function buildBuildings(data, terrain, tex, colliders) {
     const roofY = isFlat ? () => eave : (x, z) => eave + slope * (half - Math.abs(x * nx + z * nz - mid));
     // materiales de este edificio
     let wallB, gB = null, tileW = 4, tileH = 3;
-    if (urban && b.use !== 'agr') {
+    if (isChurch) wallB = ashlar;
+    else if (urban && b.use !== 'agr') {
       const k = Math.floor(rnd() * urbanB.length); wallB = urbanB[k]; tileW = 3; tileH = floorH;
       if (b.use !== 'ind' && floors >= 3) gB = groundB[Math.floor(rnd() * groundB.length)];
     } else if (b.use === 'agr') wallB = stone;
     else { const k = rnd() < 0.3 ? 1 : 0; wallB = k ? plaster : facade; gB = k ? plasterGround : facadeGround; }
     const t = 0.82 + rnd() * 0.25;
-    for (const gb of [facade, plaster, facadeGround, plasterGround, stone, ...urbanB, ...groundB]) gb.tint = [t, t * (0.97 + rnd() * 0.05), t * (0.95 + rnd() * 0.05)];
+    for (const gb of [facade, plaster, facadeGround, plasterGround, stone, ashlar, ...urbanB, ...groundB]) gb.tint = [t, t * (0.97 + rnd() * 0.05), t * (0.95 + rnd() * 0.05)];
     const age = rnd(); roof.tint = [0.75 + 0.3 * (1 - age), 0.72 + 0.25 * (1 - age) + 0.08 * age, 0.7 + 0.2 * age];
     const gH = urban ? 3.6 : 3.0, gTop = top + gH; // planta baja
     const parapet = isFlat ? 0.9 : 0;
@@ -190,9 +210,9 @@ export function buildBuildings(data, terrain, tex, colliders) {
           continue;
         }
         const hp = roofY(p[0], p[1]), hq = roofY(q[0], q[1]);
-        const gable = urban ? wallB : stone;
+        const gable = urban || isChurch ? wallB : stone;
         if (hp - eave > 0.05 || hq - eave > 0.05) {
-          if (urban) gable.quad([p[0], eave, p[1]], [q[0], eave, q[1]], [q[0], hq, q[1]], [p[0], hp, p[1]],
+          if (urban && !isChurch) gable.quad([p[0], eave, p[1]], [q[0], eave, q[1]], [q[0], hq, q[1]], [p[0], hp, p[1]],
             [0.02, 0.02], [0.03, 0.02], [0.03, 0.03], [0.02, 0.03]); // revoco liso (esquina sin ventana)
           else gable.quad([p[0], eave, p[1]], [q[0], eave, q[1]], [q[0], hq, q[1]], [p[0], hp, p[1]],
             [lp / 4, 0], [lq / 4, 0], [lq / 4, (hq - eave) / 3], [lp / 4, (hp - eave) / 3]);
@@ -209,6 +229,7 @@ export function buildBuildings(data, terrain, tex, colliders) {
       }
       continue;
     }
+    if (isChurch) church = { pts, base, top, y0, eave, slope, half, mid, rx, rz, nx, nz };
     const ov = 0.35;
     const grown = offsetPolygon(pts, ov);
     for (const side of [1, -1]) {
@@ -232,16 +253,84 @@ export function buildBuildings(data, terrain, tex, colliders) {
   }
   const group = new THREE.Group();
   const add = (gb, mat) => { if (!gb.pos.length) return; const m = new THREE.Mesh(gb.build(), mat); m.castShadow = m.receiveShadow = true; group.add(m); };
-  add(facade, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facade, roughness: 0.92 }));
-  add(plaster, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facadePlaster, roughness: 0.95 }));
+  add(facade, litWindows(new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facade, roughness: 0.92 }), tex.facadeNight));
+  add(plaster, litWindows(new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facadePlaster, roughness: 0.95 }), tex.facadePlasterNight));
   add(stone, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.stone, roughness: 0.95 }));
-  add(facadeGround, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facadeGround, roughness: 0.92 }));
-  add(plasterGround, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facadePlasterGround, roughness: 0.95 }));
+  add(ashlar, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.ashlar, roughness: 0.9 }));
+  add(facadeGround, litWindows(new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facadeGround, roughness: 0.92 }), tex.facadeGroundNight));
+  add(plasterGround, litWindows(new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facadePlasterGround, roughness: 0.95 }), tex.facadePlasterGroundNight));
+  if (church) group.add(buildChurchDetails(church, terrain, tex, colliders));
   urbanB.forEach((gb, k) => add(gb, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.urban[k], roughness: 0.9 })));
   groundB.forEach((gb, k) => add(gb, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.urbanGround[k], roughness: 0.85 })));
   add(flat, new THREE.MeshStandardMaterial({ map: tex.flatRoof, roughness: 1, vertexColors: true }));
   add(roof, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.roof, roughness: 0.8, side: THREE.DoubleSide }));
   add(eaves, new THREE.MeshStandardMaterial({ color: 0x5a2c1c, roughness: 0.9, side: THREE.DoubleSide }));
+  return group;
+}
+
+// Espadaña (campanario de muro típico de Zamora), portada, campanas y crucero en la plaza
+function buildChurchDetails(c, terrain, tex, colliders) {
+  const group = new THREE.Group();
+  const stoneTex = tex.ashlar.clone(); stoneTex.needsUpdate = true; stoneTex.repeat.set(0.25, 1 / 3);
+  const stoneMat = new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.9, color: 0xe6ddd0 });
+  // extremos del eje largo: la espadaña va en el hastial de poniente (x menor)
+  let mn = Infinity, mx = -Infinity;
+  for (const p of c.pts) { const u = p[0] * c.rx + p[1] * c.rz; mn = Math.min(mn, u); mx = Math.max(mx, u); }
+  const west = c.rx > 0 ? mn : mx, dirOut = c.rx > 0 ? -1 : 1; // hacia fuera del templo
+  const cx = c.rx * west + c.nx * c.mid, cz = c.rz * west + c.nz * c.mid;
+  const ridge = c.eave + c.slope * c.half, H = ridge + 6.5 - c.y0, W = 4.6, T = 1.1;
+  const sh = new THREE.Shape();
+  sh.moveTo(-W / 2, 0); sh.lineTo(W / 2, 0); sh.lineTo(W / 2, H - 2.2); sh.lineTo(0.35, H); sh.lineTo(-0.35, H); sh.lineTo(-W / 2, H - 2.2); sh.closePath();
+  const arch = (x, y, w, h) => { const a = new THREE.Path(); a.moveTo(x - w / 2, y); a.lineTo(x + w / 2, y); a.lineTo(x + w / 2, y + h - w / 2); a.absarc(x, y + h - w / 2, w / 2, 0, Math.PI, false); a.closePath(); return a; };
+  const yb = ridge - c.y0 + 0.4, bells = [[-1.05, yb, 1.15, 2.4], [1.05, yb, 1.15, 2.4], [0, yb + 3.0, 0.85, 1.7]];
+  for (const b of bells) sh.holes.push(arch(...b));
+  const g = new THREE.ExtrudeGeometry(sh, { depth: T, bevelEnabled: false, curveSegments: 8 });
+  g.translate(0, 0, -T / 2);
+  const esp = new THREE.Mesh(g, stoneMat); esp.castShadow = esp.receiveShadow = true;
+  // el plano del muro es perpendicular a la cumbrera
+  esp.position.set(cx + c.rx * dirOut * (T / 2 - 0.2), c.y0, cz + c.rz * dirOut * (T / 2 - 0.2));
+  esp.rotation.y = Math.atan2(c.rx, c.rz);
+  group.add(esp);
+  // campanas de bronce
+  const bellG = new THREE.LatheGeometry([[0, 0.62], [0.12, 0.6], [0.2, 0.5], [0.24, 0.25], [0.34, 0.02], [0.36, 0], [0, 0.04]].map(([x, y]) => new THREE.Vector2(x, y)), 16);
+  const bronze = new THREE.MeshStandardMaterial({ color: 0x6b5330, metalness: 0.8, roughness: 0.35 });
+  for (const [bx, by, bw, bh] of bells) {
+    const m = new THREE.Mesh(bellG, bronze); m.scale.setScalar(bw * 0.85);
+    m.position.set(bx, by + bh - bw / 2 - 0.62 * bw * 0.85, 0); esp.add(m);
+    const yoke = new THREE.Mesh(new THREE.BoxGeometry(bw, 0.12, 0.14), new THREE.MeshStandardMaterial({ color: 0x3a2a1a })); yoke.position.set(bx, by + bh - bw / 2 + 0.06, 0); esp.add(yoke);
+  }
+  // cruz de forja en lo alto
+  const iron = new THREE.MeshStandardMaterial({ color: 0x1e1e1e, metalness: 0.7, roughness: 0.5 });
+  const cv = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.1, 0.08), iron); cv.position.set(0, H + 0.55, 0); esp.add(cv);
+  const ch = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.08, 0.08), iron); ch.position.set(0, H + 0.75, 0); esp.add(ch);
+  // portada de medio punto en el hastial, bajo la espadaña
+  const doorSh = new THREE.Shape(); const dw = 1.7, dh = 3.3;
+  doorSh.moveTo(-dw / 2, 0); doorSh.lineTo(dw / 2, 0); doorSh.lineTo(dw / 2, dh - dw / 2); doorSh.absarc(0, dh - dw / 2, dw / 2, 0, Math.PI, false); doorSh.closePath();
+  const by0 = terrain.height(cx + c.rx * dirOut * T, cz + c.rz * dirOut * T) - c.y0;
+  const zf = dirOut * (T / 2);
+  const frame = new THREE.Mesh(new THREE.ShapeGeometry(doorSh, 12), stoneMat); frame.scale.set(1.35, 1.12, 1);
+  const door = new THREE.Mesh(new THREE.ShapeGeometry(doorSh, 12), new THREE.MeshStandardMaterial({ color: 0x3b2616, roughness: 0.8 }));
+  frame.position.set(0, by0, zf + dirOut * 0.01); door.position.set(0, by0, zf + dirOut * 0.03);
+  if (dirOut < 0) frame.rotation.y = door.rotation.y = Math.PI;
+  esp.add(frame, door);
+  // crucero de granito en la plaza (al sur del templo)
+  let sx = 0, sz = 0; for (const p of c.pts) { sx += p[0]; sz += p[1]; } sx /= c.pts.length; sz /= c.pts.length;
+  const px = sx + 6, pz = Math.max(...c.pts.map(p => p[1])) + 10, py = terrain.height(px, pz);
+  const cru = new THREE.Group(); cru.position.set(px, py, pz);
+  [[2.4, 0.3], [1.8, 0.3], [1.2, 0.3]].forEach(([s, h], i) => { const m = new THREE.Mesh(new THREE.BoxGeometry(s, h, s), stoneMat); m.position.y = h / 2 + i * h - 0.1; m.castShadow = m.receiveShadow = true; cru.add(m); });
+  const col = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 3.2, 10), stoneMat); col.position.y = 0.8 + 1.6; col.castShadow = true; cru.add(col);
+  const crV = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.1, 0.2), stoneMat); crV.position.y = 4.3; crV.castShadow = true; cru.add(crV);
+  const crH = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.2, 0.2), stoneMat); crH.position.y = 4.5; crH.castShadow = true; cru.add(crH);
+  group.add(cru);
+  colliders.addPolygon([[px - 1.2, pz - 1.2], [px + 1.2, pz - 1.2], [px + 1.2, pz + 1.2], [px - 1.2, pz + 1.2]], 'wall');
+  // bancos de piedra junto al crucero
+  for (const s of [-1, 1]) {
+    const bx = px + s * 3.4, bz = pz, bench = new THREE.Group(); bench.position.set(bx, terrain.height(bx, bz), bz); bench.rotation.y = Math.PI / 2;
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.12, 0.45), stoneMat); seat.position.y = 0.45; seat.castShadow = true; bench.add(seat);
+    for (const k of [-0.7, 0.7]) { const l = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.45, 0.4), stoneMat); l.position.set(k, 0.22, 0); bench.add(l); }
+    group.add(bench);
+  }
+  group.userData.plaza = [px, pz];
   return group;
 }
 
@@ -262,7 +351,7 @@ function offsetPolygon(pts, d) {
 function norm(v) { const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1] / l]; }
 
 // ---------- carreteras y calles: cintas sobre el terreno ----------
-export function buildRoads(data, terrain, tex) {
+export function buildRoads(data, terrain, tex, colliders) {
   const byMat = { asphalt: new GeoBuilder(), concrete: new GeoBuilder(), dirt: new GeoBuilder(), sidewalk: new GeoBuilder() };
   const urban = data.style === 'urban', lamps = [];
   const STREET = new Set(['residential', 'tertiary', 'secondary', 'primary', 'unclassified', 'living_street', 'tertiary_link', 'secondary_link']);
@@ -281,6 +370,21 @@ export function buildRoads(data, terrain, tex) {
       if (Math.floor((dist + L) / 28) > Math.floor(dist / 28)) {
         const side = Math.floor(dist / 28) % 2 ? 1 : -1, o = r.w / 2 + 1.2;
         lamps.push([a[0] + na[0] * o * side, a[1] + na[1] * o * side, Math.atan2(-na[0] * side, -na[1] * side)]);
+      }
+      dist += L;
+    }
+  }
+  // pueblo: farolas de brazo cada ~30 m; si caen dentro de una casa se pegan a su fachada
+  if (!urban) for (const r of data.roads) {
+    if (!STREET.has(r.k) || r.k === 'trunk') continue;
+    const P = densify(r.p, 2.5); let dist = 0, n = 0;
+    for (let i = 0; i < P.length - 1; i++) {
+      const a = P[i], b = P[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (Math.floor((dist + L) / 30) > Math.floor(dist / 30)) {
+        const na = sideNormal(P, i), side = n++ % 2 ? 1 : -1, o = r.w / 2 + 0.35;
+        const q = { x: a[0] + na[0] * o * side, z: a[1] + na[1] * o * side };
+        if (colliders) colliders.resolve(q, 0.25);
+        if (!lamps.some(l => Math.hypot(l[0] - q.x, l[1] - q.z) < 14)) lamps.push([q.x, q.z, Math.atan2(-na[0] * side, -na[1] * side)]);
       }
       dist += L;
     }
@@ -323,14 +427,23 @@ export function buildRoads(data, terrain, tex) {
     }
   }
   if (lamps.length) {
-    const pole = new THREE.CylinderGeometry(0.06, 0.09, 6, 6); pole.translate(0, 3, 0);
-    const arm = new THREE.BoxGeometry(0.08, 0.08, 1.2); arm.translate(0, 5.95, 0.55);
-    const head = new THREE.BoxGeometry(0.3, 0.12, 0.55); head.translate(0, 5.9, 1.1);
-    const g = mergeGeometries([pole, arm, head]);
-    const im = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({ color: 0x4a5056, roughness: 0.5, metalness: 0.6 }), lamps.length);
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
-    lamps.forEach(([x, z, rot], i) => { q.setFromAxisAngle(up, rot); m.compose(new THREE.Vector3(x, terrain.height(x, z), z), q, new THREE.Vector3(1, 1, 1)); im.setMatrixAt(i, m); });
-    im.castShadow = true; group.add(im); group.userData.lamps = lamps;
+    const H = urban ? 6 : 4.6;
+    const pole = new THREE.CylinderGeometry(0.06, 0.09, H, 6); pole.translate(0, H / 2, 0);
+    const arm = new THREE.BoxGeometry(0.08, 0.08, 1.2); arm.translate(0, H - 0.05, 0.55);
+    const g = mergeGeometries([pole, arm]);
+    const head = urban ? new THREE.BoxGeometry(0.3, 0.12, 0.55) : new THREE.CylinderGeometry(0.12, 0.2, 0.42, 6);
+    head.translate(0, H - 0.25, 1.1);
+    const im = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({ color: urban ? 0x4a5056 : 0x26282a, roughness: 0.5, metalness: 0.6 }), lamps.length);
+    const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff4d8, emissive: 0xffc870, emissiveIntensity: 0, roughness: 0.3 });
+    night.lamps.push(lampMat);
+    const ih = new THREE.InstancedMesh(head, lampMat, lamps.length);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3();
+    lamps.forEach(([x, z, rot], i) => {
+      q.setFromAxisAngle(up, rot); const y = terrain.height(x, z); m.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(1, 1, 1)); im.setMatrixAt(i, m); ih.setMatrixAt(i, m);
+      v.set(0, 0, 1.1).applyQuaternion(q); lamps[i] = [x, z, rot, x + v.x, y + H - 0.45, z + v.z]; // posición de la bombilla
+      if (colliders) colliders.addSegment(x - 0.12, z, x + 0.12, z, 'tree');
+    });
+    im.castShadow = true; group.add(im, ih); group.userData.lamps = lamps;
   }
   if (lines.pos.length) group.add(new THREE.Mesh(lines.build(), new THREE.MeshStandardMaterial({ color: 0xe8e8e0, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -4 })));
   return group;
