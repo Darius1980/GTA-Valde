@@ -38,7 +38,7 @@ export class Player {
   exitCar(car) {
     this.inCar = null; this.mesh.visible = true;
     const lx = Math.cos(car.heading), lz = -Math.sin(car.heading);
-    this.pos.set(car.pos.x + lx * 1.6, 0, car.pos.z + lz * 1.6);
+    const o = 0.6 + car.s; this.pos.set(car.pos.x + lx * o, 0, car.pos.z + lz * o);
     this.world.colliders.resolve(this.pos, 0.35);
     this.pos.y = this.world.terrain.height(this.pos.x, this.pos.z);
     this.heading = car.heading; this.speed = 0;

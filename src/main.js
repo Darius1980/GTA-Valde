@@ -80,7 +80,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   const player = new Player(world); scene.add(player.mesh);
   player.pos.set(data.spawn[0], terrain.height(data.spawn[0], data.spawn[1]), data.spawn[1]);
   const palette = [0xb7beca, 0x8a1c1c, 0xf2f2f0, 0x1f3550, 0x2a2a2a, 0x6d6f5a, 0xc8b28a];
-  const cars = data.cars.map(([x, z, h], i) => { const c = new Car(world, palette[i % palette.length], i % 3 === 1 ? 'suv' : 'sedan'); c.place(x, z, h); scene.add(c.mesh); return c; });
+  const cars = data.cars.map(([x, z, h], i) => { const c = new Car(world, palette[i % palette.length], i % 3 === 1 ? 'suv' : 'sedan', data.carScale || 1); c.place(x, z, h); scene.add(c.mesh); return c; });
   world.cars = cars;
   let driving = null;
   const streets = data.roads.filter(r => r.k !== 'track' && r.k !== 'path').map(r => r.p);
@@ -108,7 +108,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
       if (driving) { driving.driver = false; player.exitCar(driving); driving = null; }
       else {
         let best = null, bd = 4.5;
-        for (const c of cars) { const d = c.pos.distanceTo(player.pos); if (d < bd) { bd = d; best = c; } }
+        for (const c of cars) { const d = c.pos.distanceTo(player.pos) - 2.2 * (1 - c.s); if (d < bd) { bd = d; best = c; } }
         if (best) { driving = best; best.driver = true; player.enterCar(best); camState.yaw = best.heading + Math.PI; camState.pitch = 0.18; }
       }
     }
@@ -117,7 +117,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
 
     // cámara en tercera persona con seguimiento suave
     const target = driving ? driving.pos : player.pos;
-    const dist = driving ? 8.5 : camState.dist, height = driving ? 1.6 : 1.55;
+    const dist = driving ? 3 + 5.5 * driving.s : camState.dist, height = driving ? 0.6 + driving.s : 1.55;
     if (driving && Math.abs(look.dx) < 0.5) { // la cámara vuelve detrás del coche
       let d = (driving.heading + Math.PI) - camState.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
       camState.yaw += d * Math.min(1, dt * 2.5 * Math.min(1, Math.abs(driving.speed) / 3));

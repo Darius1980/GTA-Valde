@@ -393,6 +393,9 @@ export class Trees {
     this.hiCrown = new THREE.InstancedMesh(crownGeometry(1, 4), leafMat, NEAR);
     this.hiTrunk = new THREE.InstancedMesh(trunkGeo, barkMat, NEAR);
     this.hiCrown.castShadow = this.hiTrunk.castShadow = true; this.hiCrown.receiveShadow = true;
+    // Los árboles cercanos cambian de instancias al moverse: la esfera de recorte calculada al principio
+    // (con 0 instancias) los dejaba fuera de cámara y desaparecían. Sin recorte por frustum siempre se dibujan.
+    for (const im of [this.lowCrown, this.lowTrunk, this.hiCrown, this.hiTrunk]) im.frustumCulled = false;
     this.mats = []; this.colors = [];
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), col = new THREE.Color(), up = new THREE.Vector3(0, 1, 0);
     this.list.forEach(([x, z, sc], i) => {
