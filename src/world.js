@@ -124,7 +124,7 @@ class GeoBuilder {
 // style 'rural': piedra y teja (Valde). style 'urban': bloques revocados con lonjas en planta baja (Beraun).
 export function buildBuildings(data, terrain, tex, colliders) {
   const urban = data.style === 'urban';
-  const facade = new GeoBuilder(), plaster = new GeoBuilder(), stone = new GeoBuilder(), roof = new GeoBuilder(), eaves = new GeoBuilder(), flat = new GeoBuilder();
+  const facade = new GeoBuilder(), plaster = new GeoBuilder(), facadeGround = new GeoBuilder(), plasterGround = new GeoBuilder(), stone = new GeoBuilder(), roof = new GeoBuilder(), eaves = new GeoBuilder(), flat = new GeoBuilder();
   const urbanB = (tex.urban || []).map(() => new GeoBuilder()), groundB = (tex.urbanGround || []).map(() => new GeoBuilder());
   let seed = 1; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   for (const b of data.buildings) {
@@ -150,11 +150,12 @@ export function buildBuildings(data, terrain, tex, colliders) {
     if (urban && b.use !== 'agr') {
       const k = Math.floor(rnd() * urbanB.length); wallB = urbanB[k]; tileW = 3; tileH = floorH;
       if (b.use !== 'ind' && floors >= 3) gB = groundB[Math.floor(rnd() * groundB.length)];
-    } else wallB = b.use === 'agr' ? stone : (rnd() < 0.3 ? plaster : facade);
+    } else if (b.use === 'agr') wallB = stone;
+    else { const k = rnd() < 0.3 ? 1 : 0; wallB = k ? plaster : facade; gB = k ? plasterGround : facadeGround; }
     const t = 0.82 + rnd() * 0.25;
-    for (const gb of [facade, plaster, stone, ...urbanB, ...groundB]) gb.tint = [t, t * (0.97 + rnd() * 0.05), t * (0.95 + rnd() * 0.05)];
+    for (const gb of [facade, plaster, facadeGround, plasterGround, stone, ...urbanB, ...groundB]) gb.tint = [t, t * (0.97 + rnd() * 0.05), t * (0.95 + rnd() * 0.05)];
     const age = rnd(); roof.tint = [0.75 + 0.3 * (1 - age), 0.72 + 0.25 * (1 - age) + 0.08 * age, 0.7 + 0.2 * age];
-    const gTop = top + 3.6; // planta baja (lonjas)
+    const gH = urban ? 3.6 : 3.0, gTop = top + gH; // planta baja
     const parapet = isFlat ? 0.9 : 0;
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i], c = pts[(i + 1) % pts.length];
@@ -167,10 +168,10 @@ export function buildBuildings(data, terrain, tex, colliders) {
       for (let s = 0; s < segs.length - 1; s++) {
         const [p, lp] = segs[s], [q, lq] = segs[s + 1];
         const wTop = eave + parapet;
-        if (gB && gTop < wTop - 2) {
+        if (gB && gTop < wTop - (urban ? 2 : 0.4)) {
           // planta baja con su textura; encima, las plantas de viviendas alineadas desde arriba
-          const gu = Math.max(1, Math.round(L / 4)) / L;
-          const gBot = gTop - 3.6;
+          const gu = (urban ? Math.max(1, Math.round(L / 4)) : nTiles) / L;
+          const gBot = gTop - gH;
           gB.quad([p[0], gBot, p[1]], [q[0], gBot, q[1]], [q[0], gTop, q[1]], [p[0], gTop, p[1]],
             [lp * gu, 0], [lq * gu, 0], [lq * gu, 1], [lp * gu, 1]);
           if (gBot > y0) // zócalo liso donde la calle baja en pendiente
@@ -234,6 +235,8 @@ export function buildBuildings(data, terrain, tex, colliders) {
   add(facade, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facade, roughness: 0.92 }));
   add(plaster, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facadePlaster, roughness: 0.95 }));
   add(stone, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.stone, roughness: 0.95 }));
+  add(facadeGround, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facadeGround, roughness: 0.92 }));
+  add(plasterGround, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facadePlasterGround, roughness: 0.95 }));
   urbanB.forEach((gb, k) => add(gb, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.urban[k], roughness: 0.9 })));
   groundB.forEach((gb, k) => add(gb, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.urbanGround[k], roughness: 0.85 })));
   add(flat, new THREE.MeshStandardMaterial({ map: tex.flatRoof, roughness: 1, vertexColors: true }));

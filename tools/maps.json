@@ -6,17 +6,8 @@
   "half": 1000,
   "detail_half": 300,
   "catastro": true,
-  "car_scale": 0.5
- },
- "beraun": {
-  "title": "Beraun",
-  "query": "Beraun, Errenteria, Gipuzkoa",
-  "half": 700,
-  "detail_half": 350,
-  "catastro": false,
-  "euskadi_lidar": true,
-  "style": "urban",
-  "cars": 16,
-  "car_radius": 400
+  "car_scale": 0.7,
+  "person_scale": 0.88,
+  "road_scale": 0.8
  }
 }

@@ -40,46 +40,45 @@ const STONE = [[122, 112, 98], [104, 98, 90], [138, 124, 104], [92, 86, 80], [15
 
 function drawWindow(g, x, y, w, h, r) {
   // dintel y jambas de piedra, contraventanas de madera
-  g.fillStyle = '#8f8576'; g.fillRect(x - 6, y - 8, w + 12, h + 14);
+  g.fillStyle = '#8f8576'; g.fillRect(x - 10, y - 14, w + 20, h + 26); // dintel, jambas y alféizar de piedra
   g.fillStyle = '#1d1f22'; g.fillRect(x, y, w, h);
   g.fillStyle = 'rgba(120,150,170,0.35)'; g.fillRect(x + 3, y + 3, w / 2 - 4, h - 6); g.fillRect(x + w / 2 + 1, y + 3, w / 2 - 4, h - 6);
   g.fillStyle = '#e8e2d4'; g.fillRect(x + w / 2 - 1, y, 2, h); g.fillRect(x, y + h / 2 - 1, w, 2);
   const wood = r() < 0.5 ? '#5b3b22' : '#3f5a3a';
-  g.fillStyle = wood; g.fillRect(x - 16, y, 12, h); g.fillRect(x + w + 4, y, 12, h);
+  const sw = Math.round(w * 0.42); g.fillStyle = wood; g.fillRect(x - sw - 4, y, sw, h); g.fillRect(x + w + 4, y, sw, h);
   g.fillStyle = 'rgba(0,0,0,0.25)';
-  for (let i = 0; i < h; i += 6) { g.fillRect(x - 16, y + i, 12, 1); g.fillRect(x + w + 4, y + i, 12, 1); }
+  for (let i = 0; i < h; i += 8) { g.fillRect(x - sw - 4, y + i, sw, 2); g.fillRect(x + w + 4, y + i, sw, 2); }
 }
 
 function drawDoor(g, x, y, w, h, r) {
-  g.fillStyle = '#8f8576'; g.fillRect(x - 7, y - 8, w + 14, h + 8);
+  g.fillStyle = '#8f8576'; g.fillRect(x - 12, y - 16, w + 24, h + 16);
   const c = ['#4a2f1c', '#5e3d22', '#2f3f2c', '#6b4a2b'][Math.floor(r() * 4)];
   g.fillStyle = c; g.fillRect(x, y, w, h);
   g.fillStyle = 'rgba(0,0,0,0.3)';
-  for (let i = 8; i < w; i += 10) g.fillRect(x + i, y, 2, h);
-  g.fillStyle = '#222'; g.fillRect(x + w - 10, y + h * 0.55, 4, 4);
+  for (let i = 14; i < w; i += 18) g.fillRect(x + i, y, 3, h);
+  g.fillStyle = '#222'; g.fillRect(x + w - 18, y + h * 0.5, 8, 8);
 }
 
 export function makeTextures(renderer) {
   const max = renderer.capabilities.getMaxAnisotropy();
   const out = {};
 
-  // Fachada con ventanas: 256 px = 4 m de ancho, 192 px = 3 m (una planta)
-  {
-    const [c, g] = canvas(512, 384); const r = rng(7);
-    drawStone(g, 512, 384, r, STONE);
-    drawWindow(g, 92, 60, 72, 92, r); drawWindow(g, 348, 60, 72, 92, r);
-    drawDoor(g, 96, 230, 64, 154, r); drawWindow(g, 348, 250, 72, 86, r);
-    out.facade = tex(c);
-  }
-  // Fachada encalada / revocada (algunas casas rehabilitadas)
-  {
-    const [c, g] = canvas(512, 384); const r = rng(11);
+  // Fachadas a escala real: cada textura es una planta de 4 m x 3 m (128 px por metro).
+  // Ventanas de 0,9 x 1,2 m con alféizar a 0,9 m; puertas de 1 x 2,2 m.
+  const upper = (g, r) => { drawWindow(g, 70, 115, 115, 154, r); drawWindow(g, 327, 115, 115, 154, r); };
+  const ground = (g, r) => { drawDoor(g, 60, 102, 128, 282, r); drawWindow(g, 327, 115, 115, 154, r); };
+  const stoneBase = (g, r) => drawStone(g, 512, 384, r, STONE);
+  const plasterBase = (g, r) => {
     g.fillStyle = '#d9cfbd'; g.fillRect(0, 0, 512, 384);
     for (let i = 0; i < 4000; i++) { g.fillStyle = `rgba(${r() < .5 ? 0 : 255},${r() < .5 ? 0 : 240},200,0.05)`; g.fillRect(r() * 512, r() * 384, 2 + r() * 5, 2 + r() * 5); }
-    g.fillStyle = 'rgba(80,60,40,0.25)'; g.fillRect(0, 352, 512, 32); // zócalo manchado
-    drawWindow(g, 92, 60, 72, 92, r); drawWindow(g, 348, 60, 72, 92, r);
-    drawDoor(g, 96, 230, 64, 154, r); drawWindow(g, 348, 250, 72, 86, r);
-    out.facadePlaster = tex(c);
+  };
+  for (const [name, baseFn, openFn, seed] of [['facade', stoneBase, upper, 7], ['facadeGround', stoneBase, ground, 8],
+    ['facadePlaster', plasterBase, upper, 11], ['facadePlasterGround', plasterBase, ground, 12]]) {
+    const [c, g] = canvas(512, 384); const r = rng(seed);
+    baseFn(g, r);
+    if (name === 'facadePlasterGround') { g.fillStyle = 'rgba(80,60,40,0.25)'; g.fillRect(0, 330, 512, 54); } // zócalo manchado
+    openFn(g, r);
+    out[name] = tex(c);
   }
   // Piedra lisa (pajares, corrales, muros)
   {

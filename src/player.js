@@ -4,7 +4,7 @@ import { makeCharacter, animateCharacter } from './models.js';
 export class Player {
   constructor(world) {
     this.world = world;
-    this.mesh = makeCharacter();
+    this.mesh = makeCharacter(); this.scale = world.personScale || 1; this.mesh.scale.setScalar(this.scale);
     this.pos = new THREE.Vector3(); this.vy = 0; this.heading = 0; this.speed = 0; this.grounded = true;
     this.inCar = null;
   }
@@ -14,7 +14,7 @@ export class Player {
     const fx = -Math.sin(camYaw), fz = -Math.cos(camYaw), rx = Math.cos(camYaw), rz = -Math.sin(camYaw);
     let mx = fx * a.y + rx * a.x, mz = fz * a.y + rz * a.x;
     const mag = Math.min(1, Math.hypot(mx, mz));
-    const target = mag > 0.05 ? (input.run ? 6.0 : 2.0) * mag : 0;
+    const target = mag > 0.05 ? (input.run ? 5.5 : 1.6) * mag : 0;
     this.speed += (target - this.speed) * Math.min(1, dt * 8);
     if (mag > 0.05) {
       const h = Math.atan2(mx, mz); let d = h - this.heading; d = Math.atan2(Math.sin(d), Math.cos(d));
@@ -32,7 +32,7 @@ export class Player {
     else this.grounded = false;
 
     this.mesh.position.copy(this.pos); this.mesh.rotation.y = this.heading;
-    animateCharacter(this.mesh, this.speed, dt, !this.grounded);
+    animateCharacter(this.mesh, this.speed / this.scale, dt, !this.grounded);
   }
   enterCar(car) { this.inCar = car; this.mesh.visible = false; }
   exitCar(car) {

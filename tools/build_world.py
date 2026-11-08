@@ -115,6 +115,7 @@ for w in (e for e in osm if e["type"] == "way"):
         elif surf in ("concrete", "paving_stones", "sett", "paved"): s = "concrete"
         elif surf in ("unpaved", "gravel", "dirt", "ground", "compacted"): s = "dirt"
         if hw == "residential" and not surf: s = "asphalt"
+        if hw not in ("trunk", "primary", "secondary", "motorway"): wd = round(wd * CFG.get("road_scale", 1), 2)
         r = {"k": hw, "w": wd, "s": s, "p": pts}
         if hw in ("trunk", "primary", "secondary", "motorway"): r["lines"] = True
         if t.get("bridge") == "yes": r["bridge"] = True
@@ -283,7 +284,7 @@ if not clear(spawn, 1):
         cand = [spawn[0] + k, spawn[1]]
         if clear(cand, 1): spawn = cand; break
 
-world = {"name": NAME, "title": CFG["title"], "style": CFG.get("style", "rural"), "carScale": CFG.get("car_scale", 1), "terrain": terrain, "ortho": ortho, "buildings": buildings, "roads": roads, "walls": walls,
+world = {"name": NAME, "title": CFG["title"], "style": CFG.get("style", "rural"), "carScale": CFG.get("car_scale", 1), "personScale": CFG.get("person_scale", 1), "terrain": terrain, "ortho": ortho, "buildings": buildings, "roads": roads, "walls": walls,
          "trees": trees, "cars": cars, "spawn": spawn}
 json.dump(world, open(os.path.join(OUT, "world.json"), "w"), separators=(",", ":"))
 print("world.json", os.path.getsize(os.path.join(OUT, "world.json")) // 1024, "KB")

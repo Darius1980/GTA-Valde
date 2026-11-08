@@ -60,11 +60,12 @@ async function load(map) {
 
 const input = new Input(canvas);
 
-// Selección de mapa: por enlace (#valde, #beraun) o con los botones de la portada
+// Selección de mapa: por enlace (#valde) o con los botones de la portada (si hay varios)
 function waitForMap() {
-  const maps = ['valde', 'beraun'];
+  const maps = ['valde'];
   const h = location.hash.replace('#', '');
   if (maps.includes(h)) return Promise.resolve(h);
+  if (maps.length === 1) return Promise.resolve(maps[0]);
   const menu = document.getElementById('maps'); menu.hidden = false;
   document.getElementById('lmsg').textContent = 'Elige dónde jugar';
   return new Promise(res => menu.addEventListener('click', e => {
@@ -76,7 +77,7 @@ function waitForMap() {
 const hud = { mode: document.getElementById('mode'), speed: document.getElementById('speed'), hint: document.getElementById('hint'), place: document.getElementById('place') };
 
 waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull }) => {
-  const world = { terrain, colliders, scene };
+  const world = { terrain, colliders, scene, personScale: data.personScale || 1 };
   const player = new Player(world); scene.add(player.mesh);
   player.pos.set(data.spawn[0], terrain.height(data.spawn[0], data.spawn[1]), data.spawn[1]);
   const palette = [0xb7beca, 0x8a1c1c, 0xf2f2f0, 0x1f3550, 0x2a2a2a, 0x6d6f5a, 0xc8b28a];
@@ -87,7 +88,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   const minimap = new Minimap(document.getElementById('minimap'), oFull.image, data.ortho.full.bounds, streets);
   const engine = new EngineSound();
   for (const ev of ['keydown', 'touchstart', 'mousedown']) addEventListener(ev, () => engine.start(), { once: true });
-  const camState = { yaw: player.heading + Math.PI, pitch: 0.25, dist: 5.5, pos: new THREE.Vector3() };
+  const camState = { yaw: player.heading + Math.PI, pitch: 0.25, dist: 4.6, pos: new THREE.Vector3() };
   camera.position.copy(player.pos).add(new THREE.Vector3(0, 3, -6));
 
   loading.classList.add('done');
@@ -117,7 +118,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
 
     // cámara en tercera persona con seguimiento suave
     const target = driving ? driving.pos : player.pos;
-    const dist = driving ? 3 + 5.5 * driving.s : camState.dist, height = driving ? 0.6 + driving.s : 1.55;
+    const dist = driving ? 3 + 5.5 * driving.s : camState.dist, height = driving ? 0.6 + driving.s : 1.55 * world.personScale;
     if (driving && Math.abs(look.dx) < 0.5) { // la cámara vuelve detrás del coche
       let d = (driving.heading + Math.PI) - camState.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
       camState.yaw += d * Math.min(1, dt * 2.5 * Math.min(1, Math.abs(driving.speed) / 3));
