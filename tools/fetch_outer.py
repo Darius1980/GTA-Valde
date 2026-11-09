@@ -8,7 +8,7 @@ Uso: python tools/fetch_outer.py <mapa>      (usa "outer_half" de tools/maps.jso
 - Catastro: edificios de los pueblos de alrededor (1,5 km en torno a cada uno).
 Se guarda en data/<mapa>/outer/.
 """
-import json, math, os, sys, time, urllib.parse, urllib.request
+import glob, json, math, os, sys, time, urllib.parse, urllib.request
 from pyproj import Transformer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -18,6 +18,7 @@ OUT = os.path.join(ROOT, "data", NAME, "outer")
 os.makedirs(OUT, exist_ok=True)
 UA = {"User-Agent": "GTA-Valde/0.1 (github.com/Darius1980/GTA-Valde)"}
 HALF = CFG.get("outer_half", 10000); INNER = CFG.get("half", 1800)
+have = lambda f: os.path.exists(os.path.join(OUT, f)) and "--force" not in sys.argv  # lo ya descargado no se repite
 
 
 def get(url, data=None, timeout=300):
@@ -44,23 +45,30 @@ save("meta.json", json.dumps({"utm": [cx, cy], "half": HALF, "bbox_geo": [lat0, 
 bb = f"{lat0},{lon0},{lat1},{lon1}"
 q = (f"[out:json][timeout:600];(way({bb})[highway];way({bb})[building];way({bb})[waterway~\"^(river|stream)$\"];"
      f"node({bb})[place~\"^(village|town|hamlet|isolated_dwelling|locality)$\"];);out body;>;out skel qt;")
-for attempt in range(4):
-    ok = False
-    for ep in ["https://overpass-api.de/api/interpreter",
-               "https://overpass.private.coffee/api/interpreter",
-               "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-               "https://overpass.kumi.systems/api/interpreter"]:
-        try:
-            blob = get(ep, urllib.parse.urlencode({"data": q}).encode(), timeout=600)
-            json.loads(blob)
-            save("osm.json", blob); ok = True; break
-        except Exception as e:
-            print("overpass fail", ep, e, flush=True)
-    if ok: break
-    time.sleep(30)
+def overpass(q, fname):
+    for attempt in range(4):
+      ok = False
+      for ep in ["https://overpass-api.de/api/interpreter",
+                 "https://overpass.private.coffee/api/interpreter",
+                 "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+                 "https://overpass.kumi.systems/api/interpreter"]:
+          try:
+              blob = get(ep, urllib.parse.urlencode({"data": q}).encode(), timeout=600)
+              json.loads(blob)
+              save(fname, blob); ok = True; break
+          except Exception as e:
+              print("overpass fail", ep, e, flush=True)
+      if ok: break
+      time.sleep(30)
+if not have("osm.json"): overpass(q, "osm.json")
+# agua: embalses, lagunas y cauces (con su anchura de orilla a orilla cuando está mapeada)
+qw = (f"[out:json][timeout:600];(way({bb})[natural=water];relation({bb})[natural=water];way({bb})[waterway=riverbank];"
+      f"relation({bb})[waterway=riverbank];way({bb})[landuse=reservoir];relation({bb})[landuse=reservoir];"
+      f"way({bb})[waterway~\"^(river|stream|canal)$\"];);out body;>;out skel qt;")
+if not have("water.json"): overpass(qw, "water.json")
 
 # --- MDT 25 m
-for cov in ["Elevacion25830_25", "Elevacion25830_5"]:
+for cov in ([] if have("mdt.tif") else ["Elevacion25830_25", "Elevacion25830_5"]):
     wcs = "https://servicios.idee.es/wcs-inspire/mdt?" + urllib.parse.urlencode({
         "SERVICE": "WCS", "VERSION": "2.0.1", "REQUEST": "GetCoverage",
         "CoverageId": cov, "FORMAT": "image/tiff",
@@ -81,14 +89,14 @@ for i in range(2):
             "SERVICE": "WMS", "VERSION": "1.3.0", "REQUEST": "GetMap", "LAYERS": "OI.OrthoimageCoverage",
             "STYLES": "", "CRS": "EPSG:25830", "BBOX": f"{bx0},{by0},{bx0 + HALF},{by0 + HALF}",
             "WIDTH": 2048, "HEIGHT": 2048, "FORMAT": "image/jpeg"})
-        for k in range(3):
+        for k in range(0 if have(f"ortho_{i}_{j}.jpg") else 3):
             try:
                 save(f"ortho_{i}_{j}.jpg", get(url)); break
             except Exception as e:
                 print("pnoa fail", i, j, e, flush=True); time.sleep(10)
 
 # --- Catastro en torno a cada pueblo
-if CFG.get("catastro"):
+if CFG.get("catastro") and not glob.glob(os.path.join(OUT, "cbp_*.gml")):
     try:
         osm = json.load(open(os.path.join(OUT, "osm.json")))["elements"]
     except Exception:

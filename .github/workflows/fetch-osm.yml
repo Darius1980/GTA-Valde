@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       map: { description: "Mapa (tools/maps.json)", required: true, default: beraun }
+concurrency: { group: fetch-data, cancel-in-progress: false }
 permissions:
   contents: write
 jobs:
@@ -13,13 +14,14 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with: { ref: "${{ github.ref }}" }
       - run: pip install pyproj
       # en un push se descargan los mapas que aún no tienen datos
       - run: |
           for m in ${{ github.event.inputs.map || '$(python3 -c "import json;print(\" \".join(json.load(open(\"tools/maps.json\"))))")' }}; do
             if [ -n "${{ github.event.inputs.map }}" ] || [ ! -f "data/$m/osm.json" ]; then python tools/fetch_data.py "$m"; fi
             # entorno lejano (radio de 10 km) para los mapas que lo piden
-            if python3 -c "import json,sys;sys.exit(0 if 'outer_half' in json.load(open('tools/maps.json'))['$m'] else 1)" && [ ! -f "data/$m/outer/osm.json" ]; then python tools/fetch_outer.py "$m"; fi
+            if python3 -c "import json,sys;sys.exit(0 if 'outer_half' in json.load(open('tools/maps.json'))['$m'] else 1)" && { [ ! -f "data/$m/outer/osm.json" ] || [ ! -f "data/$m/outer/water.json" ]; }; then python tools/fetch_outer.py "$m"; fi
           done
       - run: |
           git config user.name "github-actions[bot]"
