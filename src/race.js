@@ -63,7 +63,7 @@ class RaceDriver {
     this.car.pos.x = p.x; this.car.pos.z = p.z; this.car.heading = Math.atan2(q.x - p.x, q.z - p.z);
   }
   // le han dado un golpe: pierde velocidad y tarda en recuperarse
-  bump(rel) { this.car.speed *= 0.35; this.stun = Math.max(this.stun, 0.8 + Math.min(1.5, rel * 0.1)); this.slip = Math.max(this.slip, 0.6); this.slipDir = Math.random() < 0.5 ? -1 : 1; }
+  bump(rel) { if (rel > 6) this.stun = Math.max(this.stun, 0.5 + Math.min(1, rel * 0.05)); this.slip = Math.max(this.slip, 0.5); this.slipDir = Math.random() < 0.5 ? -1 : 1; } // la velocidad ya la cambia el choque
   update(dt) {
     const c = this.car;
     if (this.go && !this.done) {
@@ -79,7 +79,8 @@ class RaceDriver {
     if (this.stun > 0) target *= 0.3;
     if (this.slip > 0) target *= 0.55;
     c.speed += THREE.MathUtils.clamp(target - c.speed, -8 * dt, 3.6 * dt);
-    this.s += c.speed * dt;
+    if (c.speed < 0) c.speed *= 0.9;
+    this.s += Math.max(0, c.speed) * dt;
     // carril: cambia de vez en cuando y, al equivocarse, se abre hacia fuera
     const laneT = this.baseLane + (this.slip > 0 ? this.slipDir * 1.4 : 0);
     this.lane += (laneT - this.lane) * Math.min(1, dt * 1.5);

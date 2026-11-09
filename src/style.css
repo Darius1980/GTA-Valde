@@ -64,14 +64,13 @@ body.touch #mission { top: auto; bottom: calc(max(28px, env(safe-area-inset-bott
 #fs[hidden] { display: none; }
 
 /* controles de coche táctiles al estilo de los juegos de móvil */
-#steer, #pedals { display: none; position: fixed; bottom: max(24px, env(safe-area-inset-bottom)); z-index: 4; gap: 16px; }
-#steer { left: max(20px, env(safe-area-inset-left)); }
-#pedals { right: max(20px, env(safe-area-inset-right)); align-items: flex-end; }
-.btn.big { width: 78px; height: 78px; font-size: 30px; border-radius: 18px; }
-.btn.gas { height: 104px; background: rgba(40,140,60,.45); }
-body.touch.driving #steer, body.touch.driving #pedals { display: flex; }
-body.touch.driving #stick, body.touch.driving [data-btn="jump"], body.touch.driving [data-btn="run"] { display: none; }
-body.touch.driving #btns { bottom: max(24px, env(safe-area-inset-bottom)); right: calc(max(20px, env(safe-area-inset-right)) + 190px); grid-template-columns: 64px; }
+#pedals { display: none; position: fixed; bottom: max(24px, env(safe-area-inset-bottom)); z-index: 4; gap: 16px; }
+#pedals { right: max(20px, env(safe-area-inset-right)); flex-direction: column; gap: 12px; }
+.btn.ped { width: 62px; height: 62px; font-size: 24px; border-radius: 14px; }
+.btn.gas { background: rgba(40,140,60,.45); }
+body.touch.driving #pedals { display: flex; }
+body.touch.driving [data-btn="jump"], body.touch.driving [data-btn="run"] { display: none; }
+body.touch.driving #btns { bottom: max(24px, env(safe-area-inset-bottom)); right: calc(max(20px, env(safe-area-inset-right)) + 82px); grid-template-columns: 64px; }
 
 /* textos en el lateral izquierdo, lejos del centro de la pantalla */
 #mission { top: max(12px, env(safe-area-inset-top)); left: 16px; transform: none; max-width: min(46vw, 420px); white-space: normal; text-align: left; }

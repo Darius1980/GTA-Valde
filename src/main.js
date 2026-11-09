@@ -215,6 +215,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     const near = !driving && cars.some(c => c.pos.distanceTo(player.pos) < 4.5);
     hud.hint.textContent = race.nearOnFoot ? 'Necesitas un coche para la carrera' : driving?.wrecked ? 'Coche averiado: bájate y coge otro' : driving ? (input.touch ? 'Pulsa 🚪 para bajar' : 'E para bajar') : near ? (input.touch ? 'Pulsa 🚪 para subir al coche' : 'E para subir al coche') : '';
     document.body.classList.toggle('driving', !!driving);
+    input.driving = !!driving;
     input.endFrame();
     renderer.render(scene, camera);
     requestAnimationFrame(frame);

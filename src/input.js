@@ -74,7 +74,7 @@ export class Input {
     const k = this.keys;
     let x = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
     let y = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
-    x += this.move.x; y += this.move.y;
+    x += this.move.x; y += this.driving ? 0 : this.move.y; // en coche el joystick solo es el volante
     const b = this.buttons; x += (b.right ? 1 : 0) - (b.left ? 1 : 0); y += (b.gas ? 1 : 0) - (b.rev ? 1 : 0);
     return { x: Math.max(-1, Math.min(1, x)), y: Math.max(-1, Math.min(1, y)) };
   }

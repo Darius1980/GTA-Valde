@@ -127,17 +127,29 @@ export class Car {
       }
       if (hitAt && v0 > 3 && this.driver) this.damage((v0 - 3) * 1.6, hitAt[0], hitAt[1]);
       for (const c of cars) if (c !== this) {
+        // par de círculos con más solape entre los dos coches
+        let best = null;
         for (const [cx, cz] of this.circles()) for (const [ox, oz] of c.circles()) {
-          const dx = cx - ox, dz = cz - oz, d = Math.hypot(dx, dz);
-          const D = 0.95 * (this.s + c.s); if (d < D && d > 1e-6) {
-            const rel = Math.abs(this.speed - c.speed * (f2x * Math.sin(c.heading) + f2z * Math.cos(c.heading)));
-            if (rel > 3 && !carHit) { const dmg = (rel - 3) * 1.6; this.damage(dmg, ...localHit(this, ox, oz)); c.damage(dmg, ...localHit(c, cx, cz)); }
-            if (!carHit) { if (c.ai?.bump) c.ai.bump(rel); else if (c.ai) c.ai.wait = -3; }
-            const push = (D - d) / 2; this.pos.x += dx / d * push; this.pos.z += dz / d * push; c.pos.x -= dx / d * push; c.pos.z -= dz / d * push;
-            if (!c.ai) c.speed += this.speed * 0.1;
-            carHit = carHit || c;
-          }
+          const dx = cx - ox, dz = cz - oz, d = Math.hypot(dx, dz), D = 0.95 * (this.s + c.s);
+          if (d < D && d > 1e-6 && (!best || D - d > best.pen)) best = { dx, dz, d, pen: D - d, cx, cz, ox, oz };
         }
+        if (!best) continue;
+        const nx = best.dx / best.d, nz = best.dz / best.d; // de c hacia este coche
+        this.pos.x += nx * best.pen / 2; this.pos.z += nz * best.pen / 2; c.pos.x -= nx * best.pen / 2; c.pos.z -= nz * best.pen / 2;
+        // choque con transferencia de impulso (masas iguales): un golpe por detrás empuja hacia delante,
+        // uno lateral desvía la trayectoria
+        const gx = Math.sin(c.heading), gz = Math.cos(c.heading);
+        let ax = f2x * this.speed, az = f2z * this.speed, bx = gx * c.speed, bz = gz * c.speed;
+        const vrel = (ax - bx) * nx + (az - bz) * nz;
+        if (vrel < 0) {
+          const j = -(1 + 0.25) * vrel / 2;
+          ax += nx * j; az += nz * j; bx -= nx * j; bz -= nz * j;
+          this.#takeVelocity(ax, az, 0.55); c.#takeVelocity(bx, bz, c.ai ? 0.3 : 0.55);
+          const hitV = -vrel;
+          if (hitV > 3 && !carHit) { const dmg = (hitV - 3) * 1.6; this.damage(dmg, ...localHit(this, best.ox, best.oz)); c.damage(dmg, ...localHit(c, best.cx, best.cz)); }
+          if (c.ai?.bump && hitV > 1.5) c.ai.bump(hitV); else if (c.ai) c.ai.wait = -3;
+        }
+        carHit = carHit || c;
       }
       if (wallN && Math.abs(this.speed) > 1) {
         // contra una pared: el coche se desvía y resbala a lo largo de ella en vez de pararse en seco
@@ -151,11 +163,24 @@ export class Car {
           this.speed *= 0.55 + 0.4 * (1 - Math.abs(dot)); // de refilón casi no frena; de frente pierde la mitad
           this.pos.x += wallN.x * 0.05; this.pos.z += wallN.z * 0.05;
         }
-      } else if (carHit && Math.abs(this.speed) > 1) this.speed *= carHit.ai ? 0.8 : 0.6;
+      }
       this.#orient(dt);
       this.settled = true;
     }
     this.#spin(dt); this.#fx(dt);
+  }
+  // adopta una velocidad (vector en planta) tras un golpe: la parte hacia delante pasa a la marcha y el coche
+  // gira parcialmente hacia la nueva dirección, porque las ruedas no dejan ir de lado
+  #takeVelocity(vx, vz, turn) {
+    const fx = Math.sin(this.heading), fz = Math.cos(this.heading), along = vx * fx + vz * fz, v = Math.hypot(vx, vz);
+    if (v > 0.5) {
+      const dir = along >= 0 ? 1 : -1;
+      let dh = Math.atan2(vx * dir, vz * dir) - this.heading; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+      this.heading += THREE.MathUtils.clamp(dh, -0.6, 0.6) * turn;
+    }
+    const side = vx * fz - vz * fx;
+    this.speed = along + Math.sign(along || 1) * Math.abs(side) * 0.25 * turn; // parte del empuje lateral se conserva
+    if (this.ai && !this.ai.bump) this.speed = Math.max(0, this.speed);
   }
   #spin(dt) {
     for (const w of this.mesh.userData.wheels) {
