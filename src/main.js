@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { Input } from './input.js';
 import { makeTextures } from './textures.js';
-import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, buildPlaza, Trees } from './world.js';
+import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, buildPlaza, Trees, smoothRoads, villageMask } from './world.js';
+import { Animals } from './animals.js';
 import { Player } from './player.js';
 import { Car } from './car.js';
 import { Minimap, EngineSound } from './hud.js';
@@ -52,15 +53,18 @@ async function load(map) {
   const terrain = new Terrain(data.terrain, Float32Array.from(hbuf.h, v => v * hbuf.scale));
   data.terrain.ortho = data.ortho; // límites para el shader
   const meta = { ...data.terrain, ortho: { full: data.ortho.full.bounds, center: data.ortho.center.bounds } };
-  scene.add(buildTerrain(meta, terrain, oFull, oCenter, tex));
+  smoothRoads(data.roads); // curvas redondeadas
+  const center = data.plaza?.start || data.spawn;
+  scene.add(buildTerrain(meta, terrain, oFull, oCenter, tex, data.style === 'urban' ? null : villageMask(data, center)));
   const colliders = new Colliders();
   const buildings = buildBuildings(data, terrain, tex, colliders); scene.add(buildings);
   scene.add(buildPlaza(data, terrain, colliders));
+  let bellTower = null; buildings.traverse(o => { if (o.userData.bellTower) bellTower = o.userData.bellTower; });
   const roads = buildRoads(data, terrain, tex, colliders); scene.add(roads);
   scene.add(buildWalls(data, terrain, tex, colliders));
   const trees = new Trees(data, terrain, tex, colliders); scene.add(trees.group);
   progress(0.95, 'Últimos detalles…');
-  return { data, terrain, colliders, trees, oFull, lamps: roads.userData.lamps };
+  return { data, terrain, colliders, trees, oFull, lamps: roads.userData.lamps, bellTower };
 }
 
 const input = new Input(canvas);
@@ -98,7 +102,7 @@ function waitForMap() {
 }
 const hud = { mode: document.getElementById('mode'), speed: document.getElementById('speed'), hint: document.getElementById('hint'), place: document.getElementById('place') };
 
-waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull, lamps }) => {
+waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull, lamps, bellTower }) => {
   const world = { terrain, colliders, scene, personScale: data.personScale || 1 };
   const player = new Player(world); scene.add(player.mesh);
   player.pos.set(data.spawn[0], terrain.height(data.spawn[0], data.spawn[1]), data.spawn[1]);
@@ -120,6 +124,8 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   // vecinos paseando
   const walkers = [];
   for (let i = 0; i < (isMobile ? 6 : 10); i++) { const w = new Walker(villageNet, world, villageNet.randomSpot(), i); scene.add(w.mesh); walkers.push(w); }
+  // gatos y perros por las calles; ciervos al atardecer en la carretera de entrada
+  const animals = new Animals({ scene, world, net: villageNet, roads: data.roads, center: data.plaza?.start || data.spawn });
   // ciclo de día y noche
   const dayNight = new DayNight({ scene, sky, sun, hemi, renderer, isMobile });
   dayNight.setLamps(lamps);
@@ -132,7 +138,8 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   const minimap = new Minimap(document.getElementById('minimap'), oFull.image, data.ortho.full.bounds, streets);
   const engine = new EngineSound();
   const missions = new Missions({ scene, terrain, start, drops: deliveryPoints(data), ui, sound: k => engine.blip(k) });
-  const clockEl = document.getElementById('clock');
+  let bellTimer = 0, bellRing = null;
+  const clockEl = document.getElementById('clock'), gearBtn = document.querySelector('[data-btn=gear]');
   const race = new Race({
     scene, world, net, start: data.race_start || [data.spawn[0] + 20, data.spawn[1] + 10], ui, sound: k => engine.blip(k), toast: (a, b) => missions.toast(a, b),
     makeCar: (col) => { const c = new Car(world, col, 'sedan', data.carScale || 1); scene.add(c.mesh); cars.push(c); return c; },
@@ -170,6 +177,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
       }
     }
     if (input.wasPressed('KeyT')) dayNight.skip(1);
+    if (driving && input.wasPressed('KeyQ', 'btn:gear')) driving.gear = driving.gear === 1 ? 2 : 1;
     world.obstacles = driving ? [...cars, ...walkers] : [...cars, ...walkers, player];
     if (driving) driving.update(dt, input, camState.yaw); else player.update(dt, input, camState.yaw);
     for (const c of cars) if (c !== driving) {
@@ -198,18 +206,36 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
 
     trees.update(target);
     dayNight.update(dt, target);
+    animals.update(dt, target, cars, dayNight);
     const nf = dayNight.n;
     for (const c of cars) c.setLights(c.ai || c === driving ? nf : 0, c === driving ? input.brake || (input.axes().y < 0 && driving.speed > 0.5) : c.ai && c.speed < 1);
     headlight.intensity = driving ? 60 * nf : 0;
     missions.update(dt, target);
     race.update(dt, driving, target);
+    // campanas: repican al pasar junto a la iglesia (como mucho una vez cada minuto y medio)
+    if (bellTower) {
+      const bd = Math.hypot(target.x - bellTower.x, target.z - bellTower.z);
+      bellTimer -= dt;
+      if (bd < 32 && bellTimer <= 0 && !bellRing && engine.ctx) { bellRing = { t: 0, next: 0, k: 0 }; bellTimer = 90; }
+      if (bellRing) {
+        bellRing.t += dt;
+        if (bellRing.t >= bellRing.next && bellRing.k < 12) {
+          const i = bellRing.k % 2, vol = 0.35 / (1 + bd / 25);
+          engine.bell(i ? 392 : 330, vol); if (bellRing.k % 4 === 3) engine.bell(523, vol * 0.6);
+          bellRing.k++; bellRing.next += 0.85;
+        }
+        bellTower.bells.forEach((b, i) => { b.rotation.x = Math.sin(bellRing.t * 3.7 + i * 1.3) * 0.9 * Math.min(1, (11 - bellRing.t) / 2); });
+        if (bellRing.t > 11) { bellRing = null; bellTower.bells.forEach(b => (b.rotation.x = 0)); }
+      }
+    }
     // la sombra sigue al jugador
     sun.position.copy(target).addScaledVector(dayNight.light, 200); sun.target.position.copy(target);
 
-    engine.update(!!driving, driving ? driving.speed : 0, driving ? input.axes().y : 0);
+    engine.update(!!driving, driving ? driving.speed : 0, driving ? input.axes().y : 0, driving ? driving.gear : 1);
     if ((frameNo++ & 1) === 0) minimap.draw(target.x, target.z, driving ? driving.heading : player.heading, camState.yaw, cars, driving, { walkers, target: race.target || missions.target, targetColor: race.target ? '#3aa0e2' : missions.state === 'deliver' ? '#47d16c' : '#f5c542' });
     camera.fov += ((driving ? 60 + Math.min(15, Math.abs(driving.speed) * 0.5) : 60) - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix();
-    hud.mode.textContent = driving ? `Conduciendo · ${driving.wrecked ? 'averiado' : `daños ${Math.round(100 - driving.health)} %`}` : 'A pie';
+    if (driving && gearBtn.dataset.g !== String(driving.gear)) { gearBtn.dataset.g = driving.gear; gearBtn.textContent = driving.gear === 1 ? 'C' : 'L'; }
+    hud.mode.textContent = driving ? `${driving.gear === 1 ? 'Corta' : 'Larga'} · ${driving.wrecked ? 'averiado' : `daños ${Math.round(100 - driving.health)} %`}` : 'A pie';
     if ((frameNo & 15) === 0) clockEl.textContent = (dayNight.n > 0.5 ? '🌙 ' : '☀️ ') + dayNight.clock;
     hud.speed.textContent = driving ? `${Math.round(Math.abs(driving.speed) * 3.6)} km/h` : '';
     const near = !driving && cars.some(c => c.pos.distanceTo(player.pos) < 4.5);
@@ -220,7 +246,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     renderer.render(scene, camera);
     requestAnimationFrame(frame);
   }
-  window.__game = { player, cars, walkers, race, camera, scene, renderer, terrain, dayNight, missions, get driving() { return driving; } };
+  window.__game = { animals, player, cars, walkers, race, camera, scene, renderer, terrain, dayNight, missions, get driving() { return driving; } };
   frame();
 }).catch(e => { console.error(e); document.getElementById('lmsg').textContent = 'Error cargando: ' + e.message; });
 

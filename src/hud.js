@@ -57,6 +57,16 @@ export class EngineSound {
       Object.assign(this, { o1, o2, f, gn });
     } catch (e) { this.ctx = null; }
   }
+  // tañido de campana: parciales inarmónicos con caída larga
+  bell(freq, vol = 0.25) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, out = this.ctx.createGain(); out.gain.value = vol; out.connect(this.ctx.destination);
+    for (const [r, a, d] of [[0.5, 0.5, 5], [1, 1, 3.5], [1.19, 0.6, 2.5], [1.5, 0.45, 2], [2, 0.35, 1.6], [2.52, 0.25, 1.1], [3.01, 0.15, 0.8]]) {
+      const o = this.ctx.createOscillator(), g = this.ctx.createGain(); o.type = 'sine'; o.frequency.value = freq * r;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(a * 0.2, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(g); g.connect(out); o.start(t); o.stop(t + d + 0.1);
+    }
+  }
   blip(kind) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime, notes = kind === 'ok' ? [660, 880, 1320] : [440, 330, 220];
@@ -66,11 +76,11 @@ export class EngineSound {
       o.connect(g); g.connect(this.ctx.destination); o.start(t + i * 0.1); o.stop(t + i * 0.1 + 0.3);
     });
   }
-  update(on, speed, throttle) {
+  update(on, speed, throttle, gear = 1) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    // marchas simuladas: las rpm suben y caen en cada cambio
-    const v = Math.abs(speed), gear = Math.min(5, Math.floor(v / 9)), rpm = 0.25 + (v - gear * 9) / 9 * 0.6 + gear * 0.04;
+    // rpm según la marcha: la corta llega arriba a ~13,5 m/s y la larga a ~29 m/s
+    const v = Math.abs(speed), rpm = 0.22 + Math.min(1.1, v / (gear === 2 ? 29 : 13.5)) * 0.75;
     const base = 38 + rpm * 90;
     this.o1.frequency.setTargetAtTime(base, t, 0.05); this.o2.frequency.setTargetAtTime(base * 0.5, t, 0.05);
     this.f.frequency.setTargetAtTime(250 + rpm * 900 + throttle * 400, t, 0.05);

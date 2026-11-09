@@ -20,7 +20,7 @@ export class Car {
     this.world = world; this.mesh = makeCar(color, kind); this.s = scale; this.mesh.scale.setScalar(scale);
     this.pos = new THREE.Vector3(); this.heading = 0; this.speed = 0; this.steer = 0; this.driver = false;
     this.settled = false; this.quat = new THREE.Quaternion();
-    this.health = 100; this.smoke = [];
+    this.health = 100; this.smoke = []; this.gear = 1;
   }
   get wrecked() { return this.health <= 0; }
   // golpe: abolla la carrocería cerca del punto de impacto (coordenadas locales sin escalar) y resta vida
@@ -98,11 +98,14 @@ export class Car {
       this.steer += (a.x * maxSteer - this.steer) * Math.min(1, dt * 6);
       const throttle = a.y;
       if (input.brake) this.speed -= Math.sign(this.speed) * Math.min(Math.abs(this.speed), 14 * dt);
-      else if (throttle > 0) this.speed += (this.speed < 0 ? 8 : 4.2 * (1 - this.speed / 34)) * throttle * dt; // 0-50 km/h en unos 4 s
+      else if (throttle > 0) { // dos marchas: corta (más tirón, hasta ~45 km/h) y larga (hasta ~90 km/h)
+        const v = Math.max(0, this.speed), F = this.gear === 2 ? 3.6 * (1 - (v / 29) ** 2) : 5.5 * (1 - (v / 13.5) ** 2);
+        this.speed += (this.speed < 0 ? 8 : Math.max(-1.5, F)) * throttle * dt;
+      }
       else if (throttle < 0) this.speed += (this.speed > 0 ? 9 : 2.5 * (1 + this.speed / 8)) * throttle * dt;
     } else this.steer *= 0.9;
     // rozamiento y resistencia
-    this.speed -= this.speed * 0.25 * dt + Math.sign(this.speed) * Math.min(Math.abs(this.speed), (input && input.axes().y ? 0.3 : 1.6) * dt);
+    this.speed -= (0.0007 * this.speed * Math.abs(this.speed) + 0.01 * this.speed) * dt + Math.sign(this.speed) * Math.min(Math.abs(this.speed), (input && input.axes().y ? 0.2 : 1.6) * dt);
     // pendiente
     const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
     const slope = terrain.height(this.pos.x + fx, this.pos.z + fz) - terrain.height(this.pos.x - fx, this.pos.z - fz);

@@ -304,14 +304,18 @@ function buildChurchDetails(c, terrain, tex, colliders) {
   esp.position.set(cx + c.rx * dirOut * (T / 2 - 0.2), c.y0, cz + c.rz * dirOut * (T / 2 - 0.2));
   esp.rotation.y = Math.atan2(c.rx, c.rz);
   group.add(esp);
+  group.userData.bellTower = { x: cx, z: cz, bells: null };
   // campanas de bronce
   const bellG = new THREE.LatheGeometry([[0, 0.62], [0.12, 0.6], [0.2, 0.5], [0.24, 0.25], [0.34, 0.02], [0.36, 0], [0, 0.04]].map(([x, y]) => new THREE.Vector2(x, y)), 16);
   const bronze = new THREE.MeshStandardMaterial({ color: 0x6b5330, metalness: 0.8, roughness: 0.35 });
+  const swing = [];
   for (const [bx, by, bw, bh] of bells) {
+    const pivot = new THREE.Group(); pivot.position.set(bx, by + bh - bw / 2, 0); esp.add(pivot); swing.push(pivot);
     const m = new THREE.Mesh(bellG, bronze); m.scale.setScalar(bw * 0.85);
-    m.position.set(bx, by + bh - bw / 2 - 0.62 * bw * 0.85, 0); esp.add(m);
+    m.position.set(0, -0.62 * bw * 0.85, 0); pivot.add(m);
     const yoke = new THREE.Mesh(new THREE.BoxGeometry(bw, 0.12, 0.14), new THREE.MeshStandardMaterial({ color: 0x3a2a1a })); yoke.position.set(bx, by + bh - bw / 2 + 0.06, 0); esp.add(yoke);
   }
+  group.userData.bellTower.bells = swing;
   // cruz de forja en lo alto
   const iron = new THREE.MeshStandardMaterial({ color: 0x1e1e1e, metalness: 0.7, roughness: 0.5 });
   const cv = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.1, 0.08), iron); cv.position.set(0, H + 0.55, 0); esp.add(cv);
@@ -578,7 +582,7 @@ export class Trees {
 }
 
 // ---------- terreno con ortofoto PNOA + textura de detalle ----------
-export function buildTerrain(meta, terrain, orthoFull, orthoCenter, tex) {
+export function buildTerrain(meta, terrain, orthoFull, orthoCenter, tex, mask = null) {
   const n = meta.n, size = (n - 1) * meta.cell;
   const geo = new THREE.PlaneGeometry(size, size, n - 1, n - 1); geo.rotateX(-Math.PI / 2);
   geo.translate(meta.origin[0] + size / 2, 0, meta.origin[1] + size / 2);
@@ -589,11 +593,13 @@ export function buildTerrain(meta, terrain, orthoFull, orthoCenter, tex) {
   const fb = meta.ortho.full, cb = meta.ortho.center;
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.tCenter = { value: orthoCenter }; sh.uniforms.tDetail = { value: tex.detail };
+    sh.uniforms.tMask = { value: mask?.tex || null }; sh.uniforms.maskB = { value: mask?.bounds || new THREE.Vector4(0, 0, 1, 1) }; sh.uniforms.tAsph = { value: tex.asphalt };
     sh.uniforms.fullB = { value: new THREE.Vector4(...fb) }; sh.uniforms.centerB = { value: new THREE.Vector4(...cb) };
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = (modelMatrix * vec4(transformed,1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
-      varying vec3 vWPos; uniform sampler2D tCenter; uniform sampler2D tDetail; uniform vec4 fullB; uniform vec4 centerB;`)
+      varying vec3 vWPos; uniform sampler2D tCenter; uniform sampler2D tDetail; uniform vec4 fullB; uniform vec4 centerB;
+      uniform sampler2D tMask; uniform sampler2D tAsph; uniform vec4 maskB;`)
       .replace('#include <map_fragment>', `
       vec2 uvF = vec2((vWPos.x - fullB.x) / (fullB.z - fullB.x), (vWPos.z - fullB.y) / (fullB.w - fullB.y));
       vec4 col = texture2D(map, uvF);
@@ -605,8 +611,58 @@ export function buildTerrain(meta, terrain, orthoFull, orthoCenter, tex) {
       float d = texture2D(tDetail, vWPos.xz / 3.0).r * 0.6 + texture2D(tDetail, vWPos.xz / 17.0).r * 0.4;
       col.rgb *= mix(1.0, d * 1.9, 0.55);
       col.rgb = pow(col.rgb, vec3(1.08)) * 1.08; // la ortofoto es plana; algo de contraste
+      ${mask ? `vec2 uvM = (vWPos.xz - maskB.xy) / maskB.zw;
+      if (uvM.x > 0.0 && uvM.x < 1.0 && uvM.y > 0.0 && uvM.y < 1.0) {
+        float a = smoothstep(0.25, 0.75, texture2D(tMask, uvM).r);
+        vec3 asph = texture2D(tAsph, vWPos.xz / 4.0).rgb * (0.92 + 0.16 * d);
+        col.rgb = mix(col.rgb, asph, a);
+      }` : ''}
       diffuseColor *= col;`);
   };
   const mesh = new THREE.Mesh(geo, mat); mesh.receiveShadow = true;
   return mesh;
+}
+
+// ---------- curvas redondeadas: recorte de esquinas (Chaikin) sin mover cruces ni extremos ----------
+export function smoothRoads(roads, iters = 2) {
+  const key = (p) => `${Math.round(p[0] * 2)},${Math.round(p[1] * 2)}`, count = new Map();
+  for (const r of roads) for (const p of r.p) count.set(key(p), (count.get(key(p)) || 0) + 1);
+  for (const r of roads) {
+    const cap = r.k === 'residential' || r.k === 'living_street' ? 5 : 14;
+    let P = r.p;
+    for (let it = 0; it < iters; it++) {
+      const fixed = (p, i) => i === 0 || i === P.length - 1 || count.get(key(p)) > 1;
+      const out = [P[0]];
+      for (let i = 1; i < P.length - 1; i++) {
+        const p = P[i];
+        if (fixed(p, i)) { out.push(p); continue; }
+        const a = P[i - 1], b = P[i + 1];
+        const la = Math.hypot(p[0] - a[0], p[1] - a[1]), lb = Math.hypot(b[0] - p[0], b[1] - p[1]);
+        const ca = Math.min(la * 0.25, cap) / (la || 1), cb = Math.min(lb * 0.25, cap) / (lb || 1);
+        out.push([p[0] + (a[0] - p[0]) * ca, p[1] + (a[1] - p[1]) * ca], [p[0] + (b[0] - p[0]) * cb, p[1] + (b[1] - p[1]) * cb]);
+      }
+      out.push(P[P.length - 1]);
+      P = out;
+    }
+    r.p = P.map(p => [p[0], p[1]]);
+  }
+  return roads;
+}
+
+// ---------- máscara del suelo del pueblo: asfalto de fachada a fachada alrededor de las calles ----------
+export function villageMask(data, center, R = 320, size = 1024) {
+  const c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d');
+  const s = size / (2 * R), X = (x) => (x - center[0] + R) * s, Y = (z) => (z - center[1] + R) * s;
+  g.strokeStyle = '#fff'; g.lineCap = 'round'; g.lineJoin = 'round'; g.filter = 'blur(2px)';
+  for (const r of data.roads) {
+    if (r.k === 'track' || r.k === 'path' || r.k === 'trunk') continue;
+    g.lineWidth = (r.w + 6) * s; g.beginPath();
+    r.p.forEach((p, i) => i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))); g.stroke();
+  }
+  // solo dentro del casco urbano: se desvanece hacia las afueras
+  g.filter = 'none'; g.globalCompositeOperation = 'destination-in';
+  const grad = g.createRadialGradient(size / 2, size / 2, 220 * s, size / 2, size / 2, 290 * s);
+  grad.addColorStop(0, '#fff'); grad.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = grad; g.fillRect(0, 0, size, size);
+  const t = new THREE.CanvasTexture(c); t.flipY = false; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false;
+  return { tex: t, bounds: new THREE.Vector4(center[0] - R, center[1] - R, 2 * R, 2 * R) };
 }

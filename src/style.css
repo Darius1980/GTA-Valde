@@ -86,3 +86,6 @@ body.touch #help { bottom: auto; top: calc(max(12px, env(safe-area-inset-top)) +
 body.touch #fs { top: auto; bottom: calc(max(28px, env(safe-area-inset-bottom)) + 240px); }
 body.touch #help { font-size: 11px; max-width: 44vw; padding: 8px 10px; line-height: 1.4; }
 body.touch #fs { top: auto; right: auto; left: 50%; transform: translateX(-50%); bottom: max(12px, env(safe-area-inset-bottom)); }
+.btn.gear { font: 900 22px Impact, sans-serif; color: #f5c542; height: 46px; }
+/* la marcha va encima del botón de la puerta, para no tapar el minimapa */
+#pedals .gear { position: absolute; right: 83px; bottom: 80px; width: 62px; }

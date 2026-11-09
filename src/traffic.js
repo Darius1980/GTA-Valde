@@ -121,30 +121,61 @@ export class Walker {
     const r = net.roads[spot.ri], side = Math.random() < 0.5 ? 1 : -1;
     this.f = new Follower(net, spot, side * (r.w / 2 + 0.5), 1.6);
     this.world = world; this.pos = new THREE.Vector3(r.p[spot.i][0], 0, r.p[spot.i][1]);
-    this.heading = 0; this.speed = 0; this.cruise = 0.9 + Math.random() * 0.6; this.down = 0; this.pause = 0;
+    this.heading = 0; this.speed = 0; this.cruise = 0.9 + Math.random() * 0.6; this.fly = null; this.getUp = 0; this.pause = 0;
   }
   update(dt, cars, player, focus) {
     const far = (this.pos.x - focus.x) ** 2 + (this.pos.z - focus.z) ** 2 > 200 * 200;
     this.mesh.visible = !far;
-    if (this.down > 0) { // atropellado: tumbado un rato y luego se levanta
-      this.down -= dt; this.mesh.rotation.x = this.down > 0.6 ? -Math.PI / 2 : -Math.PI / 2 * this.down / 0.6;
-      this.mesh.position.y = this.world.terrain.height(this.pos.x, this.pos.z) + 0.15 * Math.min(1, this.down);
+    const T = this.world.terrain;
+    if (this.fly) { // atropello: sale despedido, rueda por el suelo y se queda tendido
+      const f = this.fly; f.vy -= 15 * dt;
+      this.pos.x += f.vx * dt; this.pos.z += f.vz * dt; this.pos.y += f.vy * dt;
+      const gy = T.height(this.pos.x, this.pos.z);
+      if (!far) this.world.colliders.resolve(this.pos, 0.3);
+      f.rot += f.spin * dt;
+      if (this.pos.y <= gy) {
+        this.pos.y = gy;
+        if (Math.abs(f.vy) > 2) { f.vy = -f.vy * 0.25; f.vx *= 0.5; f.vz *= 0.5; f.spin *= 0.5; } // rebota
+        else { f.vy = 0; f.vx *= Math.max(0, 1 - dt * 6); f.vz *= Math.max(0, 1 - dt * 6); const tr = -Math.PI / 2 + Math.round((f.rot + Math.PI / 2) / (Math.PI * 2)) * Math.PI * 2; f.rot += (tr - f.rot) * Math.min(1, dt * 8); f.spin = 0; f.ground += dt; }
+      }
+      this.mesh.position.copy(this.pos); this.mesh.rotation.set(f.rot, this.heading, 0, 'YXZ');
+      if (f.ground > 6) { this.fly = null; this.getUp = 1.2; }
       return;
     }
-    this.mesh.rotation.x = 0;
+    if (this.getUp > 0) { // se levanta despacio
+      this.getUp -= dt; this.mesh.rotation.set(-Math.PI / 2 * Math.max(0, this.getUp) / 1.2, this.heading, 0, 'YXZ');
+      this.pos.y = T.height(this.pos.x, this.pos.z); this.mesh.position.copy(this.pos);
+      animateCharacter(this.mesh, 0, dt); return;
+    }
+    this.mesh.rotation.set(0, this.heading, 0);
     const pos = tmp2.set(this.pos.x, this.pos.z);
     this.f.advance(pos);
     const dx = this.f.carrot.x - this.pos.x, dz = this.f.carrot.y - this.pos.z;
     let err = Math.atan2(dx, dz) - this.heading; err = Math.atan2(Math.sin(err), Math.cos(err));
-    this.heading += err * Math.min(1, dt * 4);
     // de vez en cuando se para a mirar
     if (this.pause > 0) this.pause -= dt; else if (Math.random() < dt * 0.02) this.pause = 2 + Math.random() * 4;
-    let target = this.pause > 0 ? 0 : this.cruise;
+    let target = this.pause > 0 ? 0 : this.cruise, dodge = null;
     for (const c of cars) {
-      const ox = c.pos.x - this.pos.x, oz = c.pos.z - this.pos.z, d2 = ox * ox + oz * oz;
-      if (d2 < 9 && Math.abs(c.speed) > 4) { this.down = 4; this.heading = Math.atan2(-ox, -oz); this.world.onHit?.(this); return; }
-      if (d2 < 36 && (ox * Math.sin(this.heading) + oz * Math.cos(this.heading)) > 0) target = Math.min(target, 0.2);
+      const ox = this.pos.x - c.pos.x, oz = this.pos.z - c.pos.z, d = Math.hypot(ox, oz), v = Math.abs(c.speed);
+      // atropello: solo si de verdad le toca la carrocería
+      if (v > 2.5) for (const [cx, cz] of c.circles()) {
+        if (Math.hypot(this.pos.x - cx, this.pos.z - cz) < 0.95 * c.s + 0.25) {
+          const sgn = Math.sign(c.speed), fx = Math.sin(c.heading) * sgn, fz = Math.cos(c.heading) * sgn;
+          this.fly = { vx: fx * v * 0.75 + ox / (d || 1) * 1.5, vz: fz * v * 0.75 + oz / (d || 1) * 1.5, vy: 1.5 + v * 0.18, rot: 0, spin: -(3 + v * 0.3), ground: 0 };
+          this.pause = 0; this.world.onHit?.(this); return;
+        }
+      }
+      // un coche se acerca hacia él: se aparta hacia un lado de su trayectoria
+      if (d < 4 + v * 1.1 && v > 1) {
+        const sgn = Math.sign(c.speed), fx = Math.sin(c.heading) * sgn, fz = Math.cos(c.heading) * sgn;
+        const ahead = ox * fx + oz * fz, lat = ox * fz - oz * fx;
+        if (ahead > -1 && Math.abs(lat) < 2.6) { const side = lat >= 0 ? 1 : -1; dodge = [fz * side, -fx * side]; }
+      }
     }
+    if (dodge) { // corre hacia el lado contrario
+      const h = Math.atan2(dodge[0], dodge[1]); let e2 = h - this.heading; e2 = Math.atan2(Math.sin(e2), Math.cos(e2));
+      this.heading += e2 * Math.min(1, dt * 10); target = 3.2; this.pause = 0;
+    } else this.heading += err * Math.min(1, dt * 4);
     this.speed += (target - this.speed) * Math.min(1, dt * 3);
     this.pos.x += Math.sin(this.heading) * this.speed * dt; this.pos.z += Math.cos(this.heading) * this.speed * dt;
     // apartarse del jugador y de las paredes
