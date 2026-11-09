@@ -1,4 +1,4 @@
-// Gasolinera, taller y concesionario: en qué gastar lo que ganas.
+// Gasolinera y concesionario (el taller lo quitó Darío): en qué gastar lo que ganas.
 import * as THREE from 'three';
 import { beam } from './missions.js';
 import { textTex } from './models.js';
@@ -42,8 +42,6 @@ export function findShopSites(data, center, colliders) {
   const out = {};
   const gs = along(['trunk'], 0, lim * 1.4) || along(['tertiary'], 100, lim * 1.4);
   if (gs) out.gas = beside(gs, gs.w / 2 + 8);
-  const ts = along(['residential'], 70, 200);
-  if (ts) out.taller = { ts, b: beside(ts, ts.w / 2 + 0.6) };
   const cs = along(['trunk', 'tertiary'], 220, lim * 1.4, out.gas ? [[out.gas.x, out.gas.z]] : []);
   if (cs) out.shop = beside(cs, cs.w / 2 + 11);
   return out;
@@ -71,17 +69,6 @@ export class Shops {
       const mx = b.x + Math.cos(b.h) * 2, mz = b.z - Math.sin(b.h) * 2;
       this.places.push({ kind: 'gas', name: 'Gasolinera', x: mx, z: mz, marker: this.#marker(0xff8c1a, mx, mz) });
       this.gasAt = [mx, mz];
-    }
-    // --- taller en una calle del pueblo
-    if (sites.taller) {
-      const { ts, b } = sites.taller, g = new THREE.Group(); g.position.set(b.x + b.nx * 1.2, T.height(b.x, b.z), b.z + b.nz * 1.2); g.rotation.y = b.h;
-      const wood = mat(0x5a3d26);
-      boxAt(g, 0.12, 2.6, 0.12, wood, -0.9, 1.3, 0); boxAt(g, 0.12, 2.6, 0.12, wood, 0.9, 1.3, 0);
-      const s = sign('🔧 TALLER', '#1f3550', '#ffffff', 2, 0.6); s.position.set(0, 2.3, 0); s.rotation.y = Math.PI / 2; g.add(s);
-      for (let k = 0; k < 3; k++) { const t = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.12, 8, 16), mat(0x151515, 0.95)); t.rotation.x = Math.PI / 2; t.position.set(1.6, 0.12 + k * 0.24, 0.3); g.add(t); }
-      scene.add(g);
-      const mx = ts.p[0] + (ts.q[0] - ts.p[0]) * 0.3, mz = ts.p[1] + (ts.q[1] - ts.p[1]) * 0.3;
-      this.places.push({ kind: 'taller', name: 'Taller', x: mx, z: mz, marker: this.#marker(0x2ec4c4, mx, mz) });
     }
     // --- concesionario a las afueras, con los vehículos a la venta
     this.forSale = [];
@@ -137,7 +124,7 @@ export class Shops {
       if (!p.marker) continue;
       const d = Math.hypot(pos.x - p.x, pos.z - p.z);
       if (d > 5) continue;
-      if (!driving) { hint = p.kind === 'gas' ? 'Ven en coche para repostar' : 'Trae aquí el coche para arreglarlo'; continue; }
+      if (!driving) { hint = 'Ven en coche para repostar'; continue; }
       if (Math.abs(driving.speed) > 1.5) { hint = 'Para aquí'; continue; }
       if (p.kind === 'gas') {
         if (driving.fuel > 0.97) { hint = '⛽ El depósito ya está lleno'; continue; }
@@ -145,12 +132,6 @@ export class Shops {
         this.offer = { id: 'shop:gas', text: `⛽ Llenar el depósito por ${cost} €`, go: () => {
           if (this.wallet.money < cost) { this.toast('⛽ No te llega', `Llenar cuesta ${cost} €`); this.sound?.('fail'); return; }
           this.wallet.money -= cost; driving.fuel = 1; this.toast('⛽ Depósito lleno', `-${cost} €`); this.sound?.('ok'); } };
-      } else {
-        if (driving.health > 99) { hint = '🔧 Tu coche está perfecto'; continue; }
-        const cost = Math.max(5, Math.ceil((100 - driving.health) * 0.9));
-        this.offer = { id: 'shop:taller', text: `🔧 Arreglar el coche por ${cost} €`, go: () => {
-          if (this.wallet.money < cost) { this.toast('🔧 No te llega', `Arreglarlo cuesta ${cost} €`); this.sound?.('fail'); return; }
-          this.wallet.money -= cost; driving.repair(); this.onRepair?.(driving); this.toast('🔧 Como nuevo', `Carrocería y motor arreglados: -${cost} €`); this.sound?.('ok'); } };
       }
     }
     return hint;

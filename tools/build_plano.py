@@ -19,5 +19,7 @@ out = {
     'arboledas': [d['xy'] for d in tr if d['kind'] == 'grove'],
     'claros': [d['xy'] for d in tr if d['kind'] == 'clear'],
 }
+prev = json.load(open(f'public/world/{m}/plano.json')) if os.path.exists(f'public/world/{m}/plano.json') else {}
+if 'aerodromo' in prev: out['aerodromo'] = prev['aerodromo']  # lo pone tools/find_airfield.py
 json.dump(out, open(f'public/world/{m}/plano.json', 'w'), separators=(',', ':'))
 print({k: len(v) for k, v in out.items() if isinstance(v, list)}, out['foto'])

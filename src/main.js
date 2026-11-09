@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { Input } from './input.js';
 import { makeTextures } from './textures.js';
+import { Plane, flattenAirfield, buildAirfield, onAirfield } from './plane.js';
 import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, buildPlaza, Trees, smoothRoads, villageMask, yardWalls, buildBridges, applyPlano, planoWalls } from './world.js';
 import { Animals } from './animals.js';
 import { Player } from './player.js';
@@ -67,12 +68,14 @@ async function load(map) {
   const tex = makeTextures(renderer);
   const terrain = new Terrain(data.terrain, Float32Array.from(hbuf.h, v => v * hbuf.scale));
   if (oOuter) terrain.setOuter(odata.terrain, Float32Array.from(ohbuf.h, v => v * ohbuf.scale));
+  const airfield = plano?.aerodromo ? flattenAirfield(terrain, plano.aerodromo) : null; // pista de la avioneta (antes de dibujar el suelo)
   data.terrain.ortho = data.ortho; // límites para el shader
   const meta = { ...data.terrain, ortho: { full: data.ortho.full.bounds, center: data.ortho.center.bounds } };
   smoothRoads(data.roads); // curvas redondeadas
   const center = data.plaza?.start || data.spawn;
   const ground = buildTerrain(meta, terrain, oFull, oCenter, tex, data.style === 'urban' ? null : villageMask(data, center)); scene.add(ground);
   const colliders = new Colliders();
+  if (airfield) scene.add(buildAirfield(airfield, terrain, colliders));
   scene.add(buildBridges(data.roads, terrain, tex, colliders)); // antes que las calles: su altura pasa por el tablero
   const buildings = buildBuildings(data, terrain, tex, colliders); scene.add(buildings);
   scene.add(buildPlaza(data, terrain, colliders));
@@ -84,7 +87,7 @@ async function load(map) {
   else if (data.style !== 'urban' && !data.walls.length) data.walls = yardWalls(data, colliders, [sites.gas, sites.shop, sites.taller?.b].filter(Boolean));
   scene.add(buildWalls(data, terrain, tex, colliders));
   const clearR = [[sites.gas, 13], [sites.shop, 15]].filter(([s]) => s);
-  data.trees = data.trees.filter(([x, z]) => !clearR.some(([s, r]) => Math.hypot(x - s.x, z - s.z) < r));
+  data.trees = data.trees.filter(([x, z]) => !clearR.some(([s, r]) => Math.hypot(x - s.x, z - s.z) < r) && !(airfield && onAirfield(airfield, x, z, 14)));
   const trees = new Trees(data, terrain, tex, colliders); scene.add(trees.group);
   const outer = oOuter ? new Outer({ data: odata, terrain, tex, colliders, ortho: oOuter, scene, base }) : null;
   progress(0.95, 'Últimos detalles…');
@@ -92,7 +95,7 @@ async function load(map) {
   const surfaces = [ground.material];
   roads.traverse(o => { if (o.isMesh && o.material?.map && !surfaces.includes(o.material)) surfaces.push(o.material); });
   buildings.traverse(o => { if (o.isMesh && (o.material?.map === tex.roof || o.material?.map === tex.flatRoof) && !surfaces.includes(o.material)) surfaces.push(o.material); });
-  return { data, terrain, colliders, trees, oFull, lamps: roads.userData.lamps, bellTower, tex, surfaces, sites, outer, oOuter };
+  return { data, terrain, colliders, trees, oFull, lamps: roads.userData.lamps, bellTower, tex, surfaces, sites, outer, oOuter, airfield };
 }
 
 const input = new Input(canvas);
@@ -130,12 +133,15 @@ function waitForMap() {
 }
 const hud = { mode: document.getElementById('mode'), speed: document.getElementById('speed'), hint: document.getElementById('hint'), place: document.getElementById('place') };
 
-waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull, lamps, bellTower, tex, surfaces, sites, outer, oOuter }) => {
+waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull, lamps, bellTower, tex, surfaces, sites, outer, oOuter, airfield }) => {
   const world = { terrain, colliders, scene, personScale: data.personScale || 1 };
   const player = new Player(world); scene.add(player.mesh);
+  if (outer) world.edge = outer.data.half - 250;
+  const plane = airfield ? new Plane({ world, f: airfield }) : null; if (plane) scene.add(plane.mesh);
+  let flying = null;
   player.pos.set(data.spawn[0], terrain.height(data.spawn[0], data.spawn[1]), data.spawn[1]);
   const palette = [0xb7beca, 0x8a1c1c, 0xf2f2f0, 0x1f3550, 0x2a2a2a, 0x6d6f5a, 0xc8b28a];
-  const cars = data.cars.map(([x, z, h], i) => { const c = new Car(world, palette[i % palette.length], i % 3 === 1 ? 'suv' : 'sedan', data.carScale || 1); c.place(x, z, h); scene.add(c.mesh); return c; });
+  const cars = data.cars.map(([x, z, h], i) => { const c = new Car(world, palette[i % palette.length], i % 3 === 1 ? 'suv' : 'sedan', data.carScale || 1); c.place(x, z, h); c.home = [x, z, h]; scene.add(c.mesh); return c; });
   world.cars = cars;
   let driving = null;
 
@@ -245,7 +251,15 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     if (curOffer && (offerUI.accept || pressE && !offerUI.declined)) { const o = curOffer; offerUI.declined = true; o.go(); }
     else if (curOffer && (offerUI.reject || input.wasPressed('KeyN', 'Escape'))) offerUI.declined = true;
     else if (pressE) {
-      if (driving) {
+      if (flying) {
+        if (flying.canExit) { flying.engine = false; player.exitCar(flying); flying = null; camState.yaw = player.heading + Math.PI; }
+        else toast('✈ En marcha', 'Para la avioneta en tierra para bajarte');
+      }
+      else if (!driving && plane && plane.pos.distanceTo(player.pos) < 6) {
+        flying = plane; plane.engine = true; player.enterCar(plane);
+        toast('✈ Avioneta', input.touch ? 'Joystick arriba para acelerar por la pista y despegar' : 'W o ↑ para acelerar por la pista y despegar');
+      }
+      else if (driving) {
         if (driving.mesh.userData.rider) driving.mesh.userData.rider.visible = false;
         driving.driver = false; player.exitCar(driving); driving = null; scene.add(headlight);
       }
@@ -267,17 +281,32 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     if (input.wasPressed('KeyT')) dayNight.skip(1);
     if (driving && input.wasPressed('KeyQ', 'btn:gear')) driving.gear = driving.gear === 1 ? 2 : 1;
     world.obstacles = driving ? [...cars, ...walkers] : [...cars, ...walkers, player];
-    if (driving) driving.update(dt, input, camState.yaw); else player.update(dt, input, camState.yaw);
+    if (flying) {
+      if (flying.update(dt, input, toast) === 'crash') { flying.engine = false; player.exitCar(flying); player.pos.set(airfield.exit.x, terrain.height(airfield.exit.x, airfield.exit.z), airfield.exit.z); flying = null; sound('fail'); }
+      else player.pos.copy(flying.pos);
+    }
+    else if (driving) driving.update(dt, input, camState.yaw); else player.update(dt, input, camState.yaw);
+    if (!flying) plane?.update(0, null); // la hélice y la postura cuando está aparcada
     for (const c of cars) if (c !== driving && !c.police) {
       c.update(dt, null);
       // los coches que llegan a un callejón sin salida o al borde del mapa reaparecen lejos del jugador
       if (c.ai?.f?.deadEnd && c.pos.distanceTo(player.inCar ? driving.pos : player.pos) > 90) aiSpawn(c);
     }
-    const focus = driving ? driving.pos : player.pos;
+    const focus = flying ? flying.pos : driving ? driving.pos : player.pos;
+    // coches dañados abandonados: a los 5 minutos sin nadie al volante desaparecen y sale uno nuevo
+    // (en su sitio si estaba aparcado, o en otra calle si era del tráfico), siempre lejos de la vista
+    if ((frameNo & 15) === 0) for (const c of cars) {
+      if (c === driving || c.police || c.forSale || c.racer || c.health >= 100) { c.idleT = 0; continue; }
+      c.idleT = (c.idleT || 0) + dt * 16;
+      if (c.idleT < 300 || c.pos.distanceTo(focus) < 70 || (c.home && Math.hypot(c.home[0] - focus.x, c.home[1] - focus.z) < 70)) continue;
+      c.idleT = 0; if (!c.owned) c.color = palette[Math.random() * palette.length | 0];
+      c.repair(); c.fuel = 1; c.speed = 0;
+      if (c.home) c.place(...c.home); else if (c.aiRespawn) c.aiRespawn(); else if (c.aiKind) aiSpawn(c);
+    }
     for (const w of walkers) w.update(dt, cars, player, focus);
 
     // cámara en tercera persona con seguimiento suave
-    const target = driving ? driving.pos : player.pos;
+    const target = flying ? flying.pos : driving ? driving.pos : player.pos;
     const dist = driving ? 3 + 5.5 * driving.s : interiors.inside ? 2.6 : camState.dist, height = driving ? 0.6 + driving.s : 1.55 * world.personScale;
     if (driving && Math.abs(look.dx) < 0.5) { // la cámara vuelve detrás del coche
       let d = (driving.heading + Math.PI) - camState.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
@@ -290,6 +319,12 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     const gy = terrain.height(tmp.x, tmp.z) + 0.6; if (tmp.y < gy) tmp.y = gy;
     camera.position.lerp(tmp, hitT < 1 ? 1 - Math.exp(-dt * 30) : 1 - Math.exp(-dt * 12));
     camera.lookAt(target.x, target.y + height, target.z);
+    if (flying) { // cámara de persecución detrás y por encima de la avioneta
+      const fw = flying.forward(new THREE.Vector3()); fw.y *= 0.5;
+      tmp.copy(flying.pos).addScaledVector(fw, -15).add(new THREE.Vector3(0, 4.5, 0));
+      const gy2 = terrain.height(tmp.x, tmp.z) + 1.5; if (tmp.y < gy2) tmp.y = gy2;
+      camera.position.lerp(tmp, 1 - Math.exp(-dt * 6)); camera.lookAt(flying.pos.x + fw.x * 20, flying.pos.y + 2 + fw.y * 20, flying.pos.z + fw.z * 20);
+    }
     const fc = window.__game?.freeCam; if (fc) { camera.position.set(...fc.pos); camera.lookAt(...fc.look); }
     sky.position.copy(camera.position); // el cielo va con la cámara (el mapa mide 20 km)
 
@@ -298,6 +333,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
       outer.update(target, dayNight.far);
       // borde del mundo: 10 km desde el pueblo
       const lim = outer.data.half - 60, mover = driving || player, p = mover.pos;
+      if (!flying)
       if (Math.abs(p.x) > lim || Math.abs(p.z) > lim) {
         p.x = THREE.MathUtils.clamp(p.x, -lim, lim); p.z = THREE.MathUtils.clamp(p.z, -lim, lim);
         if (driving) driving.speed *= -0.3;
@@ -363,33 +399,36 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     // la sombra sigue al jugador
     sun.position.copy(target).addScaledVector(dayNight.light, 200); sun.target.position.copy(target);
 
-    engine.update(!!driving, driving ? driving.speed : 0, driving ? input.axes().y : 0, driving ? driving.gear : 1);
+    if (flying) engine.update(true, 6 + flying.throttle * 12, flying.throttle, 1);
+    else engine.update(!!driving, driving ? driving.speed : 0, driving ? input.axes().y : 0, driving ? driving.gear : 1);
     const offer = race.offer || jobs.offer || missions.offer || shops.offer || null;
     if ((offer?.id || null) !== offerUI.id) { offerUI.id = offer?.id || null; offerUI.declined = false; }
     curOffer = offer && !offerUI.declined ? offer : null;
     const oTxt = curOffer ? curOffer.text : '';
     if (offerUI.txt !== oTxt) { offerUI.txt = oTxt; offerEl.classList.toggle('on', !!curOffer); offerEl.querySelector('span').textContent = oTxt; }
-    if ((frameNo++ & 1) === 0) minimap.draw(target.x, target.z, driving ? driving.heading : player.heading, camState.yaw, cars, driving, { walkers, flags: [...race.starts, ...jobs.flags, ...shops.flags, ...interiors.flags], target: race.target || jobs.target || missions.target, targetColor: race.target ? '#3aa0e2' : jobs.active || missions.state === 'deliver' ? '#47d16c' : '#f5c542' });
+    if ((frameNo++ & 1) === 0) minimap.draw(target.x, target.z, flying ? flying.heading : driving ? driving.heading : player.heading, camState.yaw, cars, driving, { walkers, flags: [...race.starts, ...jobs.flags, ...shops.flags, ...interiors.flags, ...(plane ? [[plane.f.park.x, plane.f.park.z, 'air']] : [])], target: race.target || jobs.target || missions.target, targetColor: race.target ? '#3aa0e2' : jobs.active || missions.state === 'deliver' ? '#47d16c' : '#f5c542' });
     camera.fov += ((driving ? 60 + Math.min(15, Math.abs(driving.speed) * 0.5) : 60) - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix();
     if (driving && gearBtn.dataset.g !== String(driving.gear)) { gearBtn.dataset.g = driving.gear; gearBtn.textContent = driving.gear === 1 ? 'C' : 'L'; }
-    const modeTxt = driving ? `${driving.gear === 1 ? 'Corta' : 'Larga'} · ${driving.wrecked ? 'averiado' : `daños ${Math.round(100 - driving.health)} %`} <span id="fuel"><i style="width:${Math.round(driving.fuel * 100)}%"></i></span>` : interiors.inside ? interiors.inside.name : 'A pie';
+    const modeTxt = flying ? `✈ Avioneta · ${Math.round(flying.altitude)} m` : driving ? `${driving.gear === 1 ? 'Corta' : 'Larga'} · ${driving.wrecked ? 'averiado' : `daños ${Math.round(100 - driving.health)} %`} <span id="fuel"><i style="width:${Math.round(driving.fuel * 100)}%"></i></span>` : interiors.inside ? interiors.inside.name : 'A pie';
     if (hud.mode.innerHTML !== modeTxt) hud.mode.innerHTML = modeTxt;
     if ((frameNo & 15) === 0) { const w = weather.info.icon; if (wxEl.textContent !== w) wxEl.textContent = w; }
     if ((frameNo & 15) === 0) clockEl.textContent = (dayNight.n > 0.5 ? '🌙 ' : '') + dayNight.clock;
-    hud.speed.textContent = driving ? `${Math.round(Math.abs(driving.speed) * 3.6)} km/h` : '';
+    hud.speed.textContent = flying ? `${Math.round(Math.abs(flying.speed) * 3.6)} km/h` : driving ? `${Math.round(Math.abs(driving.speed) * 3.6)} km/h` : '';
     const near = !driving && cars.some(c => !c.police && !c.forSale && c.pos.distanceTo(player.pos) < 4.5);
     hud.hint.textContent = police.bustT > 0.3 ? '🚓 ¡Te están deteniendo! Escapa'
       : interiors.hint || shopHint || jobs.hint
       || (driving && driving.fuel <= 0 ? 'Sin gasolina: bájate y busca otro vehículo' : '')
       || (race.nearOnFoot ? 'Necesitas un coche para la carrera' : race.nearName && !race.active ? `🏁 ${race.nearName}` : '')
-      || (driving?.wrecked ? 'Coche averiado: llévalo al taller o coge otro' : driving ? (input.touch ? 'Pulsa 🚪 para bajar' : 'E para bajar') : near ? (input.touch ? 'Pulsa 🚪 para subir' : 'E para subir') : '');
-    document.body.classList.toggle('driving', !!driving);
+      || (flying ? (flying.onGround ? (flying.canExit ? (input.touch ? 'Pulsa 🚪 para bajar · arriba para despegar' : 'E para bajar · W para despegar') : 'Rodando…') : '') : '')
+      || (!driving && plane && plane.pos.distanceTo(player.pos) < 6 ? (input.touch ? 'Pulsa 🚪 para subir a la avioneta' : 'E para subir a la avioneta') : '')
+      || (driving?.wrecked ? 'Coche averiado: bájate y coge otro' : driving ? (input.touch ? 'Pulsa 🚪 para bajar' : 'E para bajar') : near ? (input.touch ? 'Pulsa 🚪 para subir' : 'E para subir') : '');
+    document.body.classList.toggle('driving', !!driving || !!flying);
     input.driving = !!driving;
     input.endFrame();
     renderer.render(scene, camera);
     requestAnimationFrame(frame);
   }
-  window.__game = { data, outer, weather, police, shops, jobs, plaza, interiors, save, animals, player, cars, walkers, race, camera, scene, renderer, terrain, dayNight, missions, get driving() { return driving; } };
+  window.__game = { plane, get flying() { return flying; }, data, outer, weather, police, shops, jobs, plaza, interiors, save, animals, player, cars, walkers, race, camera, scene, renderer, terrain, dayNight, missions, get driving() { return driving; } };
   frame();
 }).catch(e => { console.error(e); document.getElementById('lmsg').textContent = 'Error cargando: ' + e.message; });
 

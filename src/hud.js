@@ -60,7 +60,7 @@ export class Minimap {
 }
 
 // colores de los puntos del minimapa
-const FLAG = { leche: '#f2f2f2', correo: '#f0a020', taxi: '#2ed1ff', gas: '#ff8c1a', taller: '#2ec4c4', shop: '#d84fd8', bar: '#8b5a2b', church: '#c9b48a' };
+const FLAG = { leche: '#f2f2f2', correo: '#f0a020', taxi: '#2ed1ff', gas: '#ff8c1a', taller: '#2ec4c4', shop: '#d84fd8', bar: '#8b5a2b', church: '#c9b48a', air: '#ffffff' };
 
 export class EngineSound {
   constructor() { this.ctx = null; }
