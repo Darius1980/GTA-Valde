@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { Input } from './input.js';
 import { makeTextures } from './textures.js';
-import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, buildPlaza, Trees, smoothRoads, villageMask, yardWalls, buildBridges } from './world.js';
+import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, buildPlaza, Trees, smoothRoads, villageMask, yardWalls, buildBridges, applyPlano, planoWalls } from './world.js';
 import { Animals } from './animals.js';
 import { Player } from './player.js';
 import { Car } from './car.js';
@@ -51,7 +51,9 @@ const progress = (f, msg) => { bar.style.width = `${Math.round(f * 100)}%`; if (
 async function load(map) {
   const base = import.meta.env.BASE_URL + 'world/' + map + '/';
   progress(0.05, 'Cargando mapa…');
-  const [data, hbuf] = await Promise.all([fetch(base + 'world.json').then(r => r.json()), fetch(base + 'terrain.json').then(r => r.json())]);
+  const [data, hbuf, plano] = await Promise.all([fetch(base + 'world.json').then(r => r.json()), fetch(base + 'terrain.json').then(r => r.json()),
+    fetch(base + 'plano.json').then(r => r.ok ? r.json() : null).catch(() => null)]); // lo que Darío dibujó en el plano
+  if (plano) applyPlano(data, plano);
   progress(0.3, 'Cargando ortofoto…');
   const tl = new THREE.TextureLoader();
   const loadTex = (f) => new Promise(res => tl.load(base + f, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); res(t); }));
@@ -78,7 +80,8 @@ async function load(map) {
   const roads = buildRoads(data, terrain, tex, colliders); scene.add(roads);
   // la gasolinera y el concesionario necesitan el terreno libre de árboles
   const sites = findShopSites(data, data.plaza?.start || data.spawn, colliders);
-  if (data.style !== 'urban' && !data.walls.length) data.walls = yardWalls(data, colliders, [sites.gas, sites.shop, sites.taller?.b].filter(Boolean));
+  if (plano) data.walls = planoWalls(plano); // las tapias y ruinas reales sustituyen a las automáticas
+  else if (data.style !== 'urban' && !data.walls.length) data.walls = yardWalls(data, colliders, [sites.gas, sites.shop, sites.taller?.b].filter(Boolean));
   scene.add(buildWalls(data, terrain, tex, colliders));
   const clearR = [[sites.gas, 13], [sites.shop, 15]].filter(([s]) => s);
   data.trees = data.trees.filter(([x, z]) => !clearR.some(([s, r]) => Math.hypot(x - s.x, z - s.z) < r));

@@ -950,3 +950,44 @@ export function buildBridges(roads, terrain, tex, colliders) {
   if (deck.pos.length) g.add(new THREE.Mesh(deck.build(), new THREE.MeshStandardMaterial({ color: 0x7d7568, roughness: 1, side: THREE.DoubleSide })));
   return g;
 }
+
+// ---------- lo que Darío dibujó en el plano (public/world/<mapa>/plano.json) ----------
+const ptInPoly = (x, z, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [xi, zi] = P[i], [xj, zj] = P[j]; if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) c = !c; } return c; };
+const pairs = (xy) => { const P = []; for (let i = 0; i + 1 < xy.length; i += 2) P.push([xy[i], xy[i + 1]]); return P; };
+const segDist = (x, z, a, b) => { const dx = b[0] - a[0], dz = b[1] - a[1], L = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L)); return Math.hypot(x - a[0] - dx * t, z - a[1] - dz * t); };
+// Casas quitadas y añadidas, arboledas y claros, y el ajuste de la foto. Va antes de construir nada.
+export function applyPlano(data, plano) {
+  const f = plano.foto || {}, s = f.scale || 1, dx = f.dx || 0, dz = f.dz || 0;
+  // la foto se corrió (dx, dz) y se escaló respecto al centro del pueblo para cuadrar con el Catastro
+  for (const o of [data.ortho.full, data.ortho.center]) { const b = o.bounds; o.bounds = [dx + b[0] * s, dz + b[1] * s, dx + b[2] * s, dz + b[3] * s]; }
+  const cen = (p) => [p.reduce((a, q) => a + q[0], 0) / p.length, p.reduce((a, q) => a + q[1], 0) / p.length];
+  data.buildings = data.buildings.filter(b => !(plano.quitar || []).some(q => q.id === b.id && Math.hypot(...cen(b.p).map((v, i) => v - q.c[i])) < 1.5));
+  const nuevos = (plano.edificios || []).map((e, i) => ({ p: pairs(e.xy), f: e.f || 1, id: 'plano' + i })).filter(b => b.p.length >= 3);
+  data.buildings.push(...nuevos);
+  // árboles: fuera de los claros, de las casas nuevas y de las tapias dibujadas
+  const lines = (plano.lineas || []).map(l => pairs(l.xy)), claros = (plano.claros || []).map(pairs);
+  const blocked = (x, z) => claros.some(P => ptInPoly(x, z, P)) || nuevos.some(b => ptInPoly(x, z, b.p)) || lines.some(P => P.some((a, i) => i && segDist(x, z, P[i - 1], a) < 1.2));
+  data.trees = data.trees.filter(([x, z]) => !blocked(x, z));
+  // arboledas: se rellenan con encinas cada 5 m, sin pisar casas ni calles
+  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const onRoad = (x, z) => data.roads.some(r => r.p.some((a, i) => i && segDist(x, z, r.p[i - 1], a) < r.w / 2 + 1.5));
+  const inHouse = (x, z) => data.buildings.some(b => ptInPoly(x, z, b.p));
+  for (const xy of plano.arboledas || []) {
+    const P = pairs(xy); if (P.length < 3) continue;
+    const xs = P.map(p => p[0]), zs = P.map(p => p[1]), SP = 5;
+    for (let x = Math.min(...xs); x <= Math.max(...xs); x += SP) for (let z = Math.min(...zs); z <= Math.max(...zs); z += SP) {
+      const tx = x + (rnd() - 0.5) * SP * 0.8, tz = z + (rnd() - 0.5) * SP * 0.8;
+      if (ptInPoly(tx, tz, P) && !blocked(tx, tz) && !inHouse(tx, tz) && !onRoad(tx, tz)) data.trees.push([tx, tz, 0.9 + rnd() * 0.45]);
+    }
+  }
+}
+// Tapias (bajas, de altura pareja) y ruinas (más altas, con el remate desigual) en el formato de buildWalls
+export function planoWalls(plano) {
+  let seed = 23; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  return (plano.lineas || []).map(l => {
+    const P = pairs(l.xy); if (P.length < 2) return null;
+    const ruin = l.kind === 'ruin', p = densify(P, ruin ? 1 : 2);
+    const base = ruin ? 2.2 + rnd() * 0.8 : 1.15 + rnd() * 0.35;
+    return { p, hs: p.map(() => ruin ? base * (0.45 + rnd() * 0.65) : base + (rnd() - 0.5) * 0.1), ruin };
+  }).filter(Boolean);
+}
