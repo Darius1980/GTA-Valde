@@ -8,7 +8,7 @@ Uso: python tools/fetch_data.py <mapa>     (mapas definidos en tools/maps.json)
 - IGN MDT 5 m: relieve.
 Se ejecuta en GitHub Actions (ver .github/workflows/fetch-osm.yml).
 """
-import json, os, sys, time, urllib.parse, urllib.request
+import glob, json, os, sys, time, urllib.parse, urllib.request
 from pyproj import Transformer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -51,7 +51,7 @@ save("meta.json", json.dumps({"center": [LAT, LON], "utm": [cx, cy], "half": HAL
 
 # --- OpenStreetMap
 bb = f"{lat0},{lon0},{lat1},{lon1}"
-q = f"[out:json][timeout:120];(way({bb});relation({bb})[building];relation({bb})[type=multipolygon];node({bb}););out body;>;out skel qt;"
+q = f"[out:json][timeout:300];(way({bb});relation({bb})[building];relation({bb})[type=multipolygon];node({bb}););out body;>;out skel qt;"
 for attempt in range(4):
     ok = False
     for ep in ["https://overpass-api.de/api/interpreter",
@@ -72,9 +72,10 @@ for attempt in range(4):
 if CFG.get("catastro"):
     base = "https://ovc.catastro.meh.es/INSPIRE/wfsBU.aspx?"
     T = 500
+    for old in glob.glob(os.path.join(OUT, "catastro_*.gml")): os.remove(old)  # teselas de una extensión anterior
     for tname, prefix in [("BU.BUILDING", "catastro_building"), ("BU.BUILDINGPART", "catastro_buildingpart")]:
-        for i in range(int(2 * HALF / T)):
-            for j in range(int(2 * HALF / T)):
+        for i in range(-(-int(2 * HALF) // T)):
+            for j in range(-(-int(2 * HALF) // T)):
                 bx, by = x0 + i * T, y0 + j * T
                 params = {"service": "WFS", "version": "2.0.0", "request": "GetFeature", "typeNames": tname,
                           "srsName": "EPSG::25830", "bbox": f"{bx:.1f},{by:.1f},{bx + T:.1f},{by + T:.1f}"}
@@ -95,7 +96,7 @@ def ortho(name, x0, y0, x1, y1, px):
         print("pnoa fail", name, e)
 
 
-ortho("ortho.jpg", x0, y0, x1, y1, 2048)
+ortho("ortho.jpg", x0, y0, x1, y1, 4096 if HALF > 1000 else 2048)
 D = CFG.get("detail_half", 300)
 ortho("ortho_center.jpg", cx - D, cy - D, cx + D, cy + D, 2400)
 
