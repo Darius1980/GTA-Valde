@@ -385,7 +385,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     renderer.render(scene, camera);
     requestAnimationFrame(frame);
   }
-  window.__game = { weather, police, shops, jobs, plaza, interiors, save, animals, player, cars, walkers, race, camera, scene, renderer, terrain, dayNight, missions, get driving() { return driving; } };
+  window.__game = { data, outer, weather, police, shops, jobs, plaza, interiors, save, animals, player, cars, walkers, race, camera, scene, renderer, terrain, dayNight, missions, get driving() { return driving; } };
   frame();
 }).catch(e => { console.error(e); document.getElementById('lmsg').textContent = 'Error cargando: ' + e.message; });
 

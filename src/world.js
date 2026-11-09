@@ -674,28 +674,44 @@ export function yardWalls(data, colliders, avoid = []) {
   const onRoad = (x, z, own) => { const i = Math.floor(x / C), j = Math.floor(z / C); for (let a = i - 1; a <= i + 1; a++) for (let b = j - 1; b <= j + 1; b++) for (const [px, pz, hw, rr] of grid.get(`${a},${b}`) || []) if (Math.hypot(px - x, pz - z) < hw + (rr === own ? 0.3 : 1.0)) return true; return false; };
   let seed = 11; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   const STREETS = new Set(['residential', 'living_street', 'tertiary', 'unclassified', 'secondary']);
+  // Las tapias siguen la línea de fachadas: en cada lado de la calle se mide (con un rayo perpendicular) a qué
+  // distancia está la casa, y los huecos entre una casa y la siguiente se cierran a esa misma distancia.
+  const REACH = 18, MAXGAP = 60;
   for (const r of data.roads) {
     if (!STREETS.has(r.k)) continue;
     const P = densify(r.p, 2);
     for (const side of [1, -1]) {
-      let run = [], hs = [], kind, base, maxLen;
-      const pick = () => { kind = rnd() < 0.25 ? 'ruin' : 'wall'; base = kind === 'ruin' ? 2.2 + rnd() * 1.2 : 1.0 + rnd() * 0.6; maxLen = 8 + rnd() * 14; };
-      const hAt = () => kind === 'ruin' ? base * (0.55 + rnd() * 0.6) : base + (rnd() - 0.5) * 0.15;
-      const flush = (keep) => {
-        if (run.length >= 2) out.push({ p: run, hs, ruin: kind === 'ruin' });
-        const last = keep && run.length ? run[run.length - 1] : null; run = []; hs = []; pick();
-        if (last) { run.push(last); hs.push(hAt()); } // el tramo siguiente empieza donde acaba este: sin huecos
-      };
-      pick();
-      for (let i = 0; i < P.length; i++) {
-        const n = sideNormal(P, Math.min(i, P.length - 2)), o = r.w / 2 + 0.6, x = P[i][0] + n[0] * o * side, z = P[i][1] + n[1] * o * side;
-        const d = Math.hypot(x - cx, z - cz);
-        const ok = d > 45 && d < 270 && !colliders.nearest(x, z, 0.9) && !onRoad(x, z, r) && !avoid.some(s => Math.hypot(s.x - x, s.z - z) < 20);
-        if (!ok) { flush(false); continue; }
-        run.push([x, z]); hs.push(hAt());
-        if ((run.length - 1) * 2 >= maxLen) flush(true);
+      const N = P.map((p, i) => sideNormal(P, Math.min(i, P.length - 2)));
+      const d0 = r.w / 2 + 0.3;
+      const F = P.map((p, i) => { // distancia del eje a la fachada en este punto (o null si no hay casa)
+        const n = N[i], ax = p[0] + n[0] * d0 * side, az = p[1] + n[1] * d0 * side;
+        const t = colliders.raycast(ax, az, ax + n[0] * REACH * side, az + n[1] * REACH * side);
+        return t < 1 ? d0 + t * REACH : null;
+      });
+      let i = 0;
+      while (i < P.length) {
+        if (F[i] == null || (i + 1 < P.length && F[i + 1] != null)) { i++; continue; }
+        // i = última muestra con casa; buscar la siguiente con casa
+        let j = i + 1; while (j < P.length && F[j] == null) j++;
+        if (j >= P.length || (j - i) * 2 > MAXGAP || j - i < 2) { i = j; continue; }
+        const pts = [], ok = [];
+        for (let k = i; k <= j; k++) {
+          const f = F[i] + (F[j] - F[i]) * (k - i) / (j - i) + 0.15, n = N[k], x = P[k][0] + n[0] * f * side, z = P[k][1] + n[1] * f * side;
+          const dc = Math.hypot(x - cx, z - cz);
+          pts.push([x, z]); ok.push(dc > 30 && dc < 300 && !onRoad(x, z, r) && !avoid.some(s_ => Math.hypot(s_.x - x, s_.z - z) < 20));
+        }
+        // trozos seguidos sin calles cruzando; empiezan y acaban pegados a la casa
+        let run = [];
+        const emit = () => {
+          if (run.length >= 2) {
+            const ruin = rnd() < 0.25, base = ruin ? 2.2 + rnd() * 1.2 : 1.0 + rnd() * 0.6;
+            out.push({ p: run, hs: run.map(() => ruin ? base * (0.55 + rnd() * 0.6) : base + (rnd() - 0.5) * 0.15), ruin });
+          }
+          run = [];
+        };
+        pts.forEach((q, k) => { if (ok[k]) run.push(q); else emit(); }); emit();
+        i = j;
       }
-      flush(false);
     }
   }
   return out;
