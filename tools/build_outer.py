@@ -67,6 +67,13 @@ def simplify(P, eps):
     if d[k - 1] < eps: return [P[0], P[-1]]
     return simplify(P[:k + 1], eps)[:-1] + simplify(P[k:], eps)
 
+def simplify_ring(P, eps):
+    # anillo cerrado: se simplifica en dos mitades (con primer y último punto iguales la recta base no existe)
+    if P and P[0] == P[-1]: P = P[:-1]
+    if len(P) < 6: return P
+    m = len(P) // 2
+    return simplify(P[:m + 1], eps)[:-1] + simplify(P[m:] + [P[0]], eps)[:-1]
+
 ROADS = {"trunk": (7.5, "asphalt"), "primary": (7, "asphalt"), "secondary": (6.5, "asphalt"), "tertiary": (6, "asphalt"),
          "unclassified": (5, "asphalt"), "residential": (5, "asphalt"), "living_street": (4, "asphalt"), "service": (3.5, "dirt"),
          "track": (3, "dirt"), "primary_link": (5, "asphalt"), "secondary_link": (5, "asphalt"), "tertiary_link": (5, "asphalt"),
@@ -104,6 +111,7 @@ def Hg(x, z):  # altura del relieve lejano (rejilla) en coordenadas del juego
     fx = min(n - 1.001, max(0, (x - o) / CELL)); fz = min(n - 1.001, max(0, (z - o) / CELL))
     i, j = int(fx), int(fz); u, v = fx - i, fz - j
     return float((heights[j, i] * (1 - u) + heights[j, i + 1] * u) * (1 - v) + (heights[j + 1, i] * (1 - u) + heights[j + 1, i + 1] * u) * v)
+def area(pts): return sum(pts[i][0] * pts[(i + 1) % len(pts)][1] - pts[(i + 1) % len(pts)][0] * pts[i][1] for i in range(len(pts))) / 2
 water = {"polys": [], "rivers": []}
 wp = os.path.join(DO, "water.json")
 if os.path.exists(wp):
@@ -124,12 +132,12 @@ if os.path.exists(wp):
             out.append(ring)
         return out
     def add_poly(outer, holes):
-        P = simplify(outer, 1.0)
-        if len(P) < 4 or abs(area(P)) < 150: return
+        P = simplify_ring(outer, 1.0)
+        if len(P) < 3 or abs(area(P)) < 150: return
         # el nivel del agua: lo más bajo de la orilla según el relieve
-        hs = sorted(Hg(*q) for q in densify(P, 20))
+        hs = sorted(Hg(*q) for q in densify(P + [P[0]], 20))
         y = hs[max(0, len(hs) // 10)]
-        water["polys"].append({"p": P[:-1] if P[0] == P[-1] else P, "h": [simplify(hh, 1.0)[:-1] for hh in holes if len(hh) > 3], "y": round(y, 2)})
+        water["polys"].append({"p": P, "h": [simplify_ring(hh, 1.0) for hh in holes if len(hh) > 3], "y": round(y, 2)})
     def densify(P, st):
         out = []
         for a_, b_ in zip(P, P[1:]):
@@ -174,12 +182,12 @@ def clean(pts):
     for q in pts:
         if not out or math.dist(out[-1], q) > 0.3: out.append(q)
     if len(out) >= 3 and math.dist(out[0], out[-1]) < 0.3: out.pop()
-    out = simplify(out + [out[0]], 0.25)[:-1] if len(out) > 4 else out
+    out = simplify_ring(out, 0.25)
     return out if len(out) >= 3 and abs(area(out)) >= 6 else None
 uses = {}
 for p in glob.glob(os.path.join(DO, "cb_*.gml")):
     for gid, _, _, use in parse_gml(p): uses[gid.replace("ES.SDGC.BU.", "")] = use
-blds, seen = [], set()
+blds, seen, rej = [], set(), {"forma": 0, "pueblo": 0}
 for p in glob.glob(os.path.join(DO, "cbp_*.gml")):
     for gid, rings, fl, _ in parse_gml(p):
         if gid in seen or not fl: continue
@@ -188,7 +196,8 @@ for p in glob.glob(os.path.join(DO, "cbp_*.gml")):
         for ring in rings[:1]:
             v = list(map(float, ring.split()))
             pts = clean([loc(v[i], v[i + 1]) for i in range(0, len(v), 2)])
-            if not pts or any(inside_inner(q) for q in pts): continue
+            if not pts: rej["forma"] += 1; continue
+            if any(inside_inner(q) for q in pts): rej["pueblo"] += 1; continue
             blds.append({"p": pts, "f": min(fl, 3), "use": "res" if use.startswith("1_") else "pub" if use.startswith("4_") else "agr"})
 cat = len(blds)
 cgrid = {}
@@ -201,7 +210,7 @@ for w in (e for e in osm if e["type"] == "way" and "building" in e.get("tags", {
     if any(math.dist(c, q) < 12 for a in (-1, 0, 1) for b in (-1, 0, 1) for q in cgrid.get((gi + a, gj + b), [])): continue
     t = w["tags"]; lv = t.get("building:levels", "")
     blds.append({"p": pts, "f": int(lv) if lv.isdigit() else 1, "use": "res" if t["building"] in ("house", "residential", "detached") else "agr"})
-print("edificios:", cat, "catastro +", len(blds) - cat, "osm")
+print("edificios:", cat, "catastro +", len(blds) - cat, "osm; descartados", rej)
 # agrupados en teselas de 1 km para recortarlos por distancia en el juego
 groups = {}
 for b in blds:
@@ -225,7 +234,7 @@ for r in roads: dr.line([px(q) for q in r["p"]], fill=255, width=max(2, int((r["
 blk = np.asarray(blk) > 0
 rng = np.random.default_rng(7)
 cand = np.argwhere((dens > 0.5) & ~blk); rng.shuffle(cand)
-trees, occ, SP, MAXT = [], set(), 11.0, CFG.get("outer_trees", 45000)
+trees, occ, SP, MAXT = [], set(), 8.0, CFG.get("outer_trees", 150000)
 for j, i in cand:
     x = (i + 0.5) * mpp - HALF + rng.uniform(-2, 2); z = (j + 0.5) * mpp - HALF + rng.uniform(-2, 2)
     if math.hypot(x, z) < INNER - 100 and abs(x) < INNER and abs(z) < INNER: continue
@@ -235,7 +244,18 @@ for j, i in cand:
     if len(trees) >= MAXT: break
 print("encinas:", len(trees))
 
-out = {"half": HALF, "terrain": terrain, "ortho": ortho, "roads": roads, "water": water, "groups": bgroups, "trees": trees, "places": places}
+# ortofotos de detalle de cada pueblo (1,6 km)
+detail = []
+for f in sorted(glob.glob(os.path.join(DO, "ortho_v_*.jpg"))):
+    nid = int(re.search(r"ortho_v_(\d+)", f).group(1)); nd = nodes.get(nid)
+    if not nd: continue
+    try: im = Image.open(f).convert("RGB")
+    except Exception as e: print("detalle", f, e); continue
+    name = os.path.basename(f); im.save(os.path.join(OUT, name), quality=82)
+    x, z = loc(*to_utm.transform(nd["lon"], nd["lat"]))
+    detail.append({"file": name, "bounds": [x - 800, z + 800, x + 800, z - 800], "c": [x, z]})
+print("ortofotos de detalle:", len(detail))
+out = {"half": HALF, "detail": detail, "terrain": terrain, "ortho": ortho, "roads": roads, "water": water, "groups": bgroups, "trees": trees, "places": places}
 json.dump(out, open(os.path.join(OUT, "outer.json"), "w"), separators=(",", ":"))
 for f in ("outer.json", "terrain_outer.json", "ortho_outer.jpg"):
     print(f, os.path.getsize(os.path.join(OUT, f)) // 1024, "KB")

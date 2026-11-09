@@ -83,7 +83,7 @@ async function load(map) {
   const clearR = [[sites.gas, 13], [sites.shop, 15]].filter(([s]) => s);
   data.trees = data.trees.filter(([x, z]) => !clearR.some(([s, r]) => Math.hypot(x - s.x, z - s.z) < r));
   const trees = new Trees(data, terrain, tex, colliders); scene.add(trees.group);
-  const outer = oOuter ? new Outer({ data: odata, terrain, tex, colliders, ortho: oOuter, scene }) : null;
+  const outer = oOuter ? new Outer({ data: odata, terrain, tex, colliders, ortho: oOuter, scene, base }) : null;
   progress(0.95, 'Últimos detalles…');
   // superficies que se mojan con la lluvia y se cubren de nieve
   const surfaces = [ground.material];
@@ -288,6 +288,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     camera.position.lerp(tmp, hitT < 1 ? 1 - Math.exp(-dt * 30) : 1 - Math.exp(-dt * 12));
     camera.lookAt(target.x, target.y + height, target.z);
     const fc = window.__game?.freeCam; if (fc) { camera.position.set(...fc.pos); camera.lookAt(...fc.look); }
+    sky.position.copy(camera.position); // el cielo va con la cámara (el mapa mide 20 km)
 
     trees.update(target);
     if (outer) {

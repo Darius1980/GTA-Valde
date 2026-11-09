@@ -7,8 +7,8 @@ import { weatherize } from './weather.js';
 const TILE = 2000; // teselas de carreteras, edificios y árboles
 
 export class Outer {
-  constructor({ data, terrain, tex, colliders, ortho, scene }) {
-    Object.assign(this, { data, terrain, tex, colliders, scene });
+  constructor({ data, terrain, tex, colliders, ortho, scene, base }) {
+    Object.assign(this, { data, terrain, tex, colliders, scene, base, ortho });
     this.group = new THREE.Group(); scene.add(this.group);
     this.shared = new Map(); this.surfaces = []; this.U = null;
     this.places = data.places || [];
@@ -81,7 +81,7 @@ export class Outer {
     for (const tr of data.trees) tile(tr[0], tr[1]).trees.push(tr);
     // encina: copa ancha y achaparrada, tronco corto
     this.crown = crownGeometry(0, 3); this.trunk = new THREE.CylinderGeometry(0.16, 0.26, 1.6, 5); this.trunk.translate(0, 0.8, 0);
-    this.leafMat = new THREE.MeshStandardMaterial({ map: tex.leaves, color: 0x7d8c66, roughness: 0.95, flatShading: true });
+    this.leafMat = new THREE.MeshStandardMaterial({ map: tex.leaves, color: 0x9aa884, roughness: 0.95, flatShading: true });
     this.barkMat = new THREE.MeshStandardMaterial({ map: tex.bark, roughness: 1 });
     this.queue = [];
   }
@@ -114,6 +114,19 @@ export class Outer {
     }
     return null;
   }
+  // ortofoto de detalle del pueblo más cercano (se carga al acercarse)
+  detail(pos) {
+    const list = this.data.detail || []; let best = null, bd = 1600;
+    for (const d of list) { const k = Math.hypot(d.c[0] - pos.x, d.c[1] - pos.z); if (k < bd) { bd = k; best = d; } }
+    if (!best || best === this.curDetail || this.loadingDetail) return;
+    this.loadingDetail = true;
+    new THREE.TextureLoader().load(this.base + best.file, t => {
+      t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; this.loadingDetail = false;
+      const u = this.terrainMat.userData; if (!u.tC) { t.dispose(); this.curDetail = null; return; } // aún sin compilar: se reintenta
+      const old = this.curDetail && u.tC.value; u.tC.value = t; u.cB.value.set(...best.bounds);
+      if (old && old !== this.ortho) old.dispose(); this.curDetail = best;
+    }, undefined, () => { this.loadingDetail = false; this.curDetail = best; });
+  }
   setWeather(U) { this.U = U; for (const m of this.surfaces) weatherize(m, U); }
   // un material por textura para todas las teselas (menos programas y cambios de estado)
   share(obj) {
@@ -138,7 +151,7 @@ export class Outer {
         const y = this.terrain.height(x, z); q.setFromAxisAngle(up, (x * 13.37 + z * 7.1) % 6.28);
         s.set(sc * 1.2, sc, sc * 1.2); p.set(x, y - 0.1, z); m.compose(p, q, s); trunks.setMatrixAt(i, m);
         s.set(sc * 2.9, sc * 1.7, sc * 2.9); p.set(x, y + sc * 2.3, z); m.compose(p, q, s); crowns.setMatrixAt(i, m);
-        col.setHSL(0.21 + (((x * 3.1 + z) % 1) + 1) % 1 * 0.05, 0.2, 0.3 + (((x + z * 2.3) % 1) + 1) % 1 * 0.1); crowns.setColorAt(i, col);
+        col.setHSL(0.2 + (((x * 3.1 + z) % 1) + 1) % 1 * 0.06, 0.22, 0.4 + (((x + z * 2.3) % 1) + 1) % 1 * 0.12); crowns.setColorAt(i, col);
         const r = 0.35 * sc; this.colliders.addSegment(x - r, z, x + r, z, 'tree'); this.colliders.addSegment(x, z - r, x, z + r, 'tree');
       });
       crowns.computeBoundingSphere(); trunks.computeBoundingSphere();
@@ -155,6 +168,10 @@ export class Outer {
       c.obj.visible = dx * dx + dz * dz < R * R;
     }
     if ((this._t = (this._t || 0) + 1) % 10) { if (this.queue.length) this.build(this.queue.shift()); return; }
+    this.scan(pos, R); this.detail(pos);
+    if (this.queue.length) this.build(this.queue.shift());
+  }
+  scan(pos, R) {
     const want = [];
     for (const T of this.tiles.values()) {
       const dx = Math.max(Math.abs(pos.x - T.cx) - TILE / 2, 0), dz = Math.max(Math.abs(pos.z - T.cz) - TILE / 2, 0), d = Math.hypot(dx, dz);
@@ -162,10 +179,9 @@ export class Outer {
       else if (d < R + 300 && !this.queue.includes(T)) want.push([d, T]);
     }
     want.sort((a, b) => a[0] - b[0]); for (const [, T] of want) this.queue.push(T);
-    if (this.queue.length) this.build(this.queue.shift());
   }
   // construir ya lo que rodea al jugador (al cargar una partida lejos del pueblo)
-  prime(pos, far) { this.update(pos, far); while (this.queue.length) this.build(this.queue.shift()); }
+  prime(pos, far) { this.update(pos, far); this.scan(pos, far + 150); while (this.queue.length) this.build(this.queue.shift()); }
   placeName(x, z) {
     let best = null, bd = 1400;
     for (const p of this.places) { const d = Math.hypot(p.c[0] - x, p.c[1] - z); if (d < bd && p.kind !== 'locality' && p.kind !== 'isolated_dwelling') { bd = d; best = p; } }

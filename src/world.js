@@ -822,9 +822,9 @@ export function buildTerrain(meta, terrain, orthoFull, orthoCenter, tex, mask = 
 export function terrainMaterial(orthoFull, orthoCenter, fb, cb, tex, mask = null) {
   const mat = new THREE.MeshStandardMaterial({ map: orthoFull, roughness: 1 });
   mat.onBeforeCompile = (sh) => {
-    sh.uniforms.tCenter = { value: orthoCenter }; sh.uniforms.tDetail = { value: tex.detail };
+    sh.uniforms.tCenter = mat.userData.tC || (mat.userData.tC = { value: orthoCenter }); sh.uniforms.tDetail = { value: tex.detail };
     sh.uniforms.tMask = { value: mask?.tex || null }; sh.uniforms.maskB = { value: mask?.bounds || new THREE.Vector4(0, 0, 1, 1) }; sh.uniforms.tAsph = { value: tex.asphalt }; sh.uniforms.tConc = { value: tex.concrete }; sh.uniforms.tDirt = { value: tex.dirt };
-    sh.uniforms.fullB = { value: new THREE.Vector4(...fb) }; sh.uniforms.centerB = { value: new THREE.Vector4(...cb) };
+    sh.uniforms.fullB = { value: new THREE.Vector4(...fb) }; sh.uniforms.centerB = mat.userData.cB || (mat.userData.cB = { value: new THREE.Vector4(...cb) });
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = (modelMatrix * vec4(transformed,1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
