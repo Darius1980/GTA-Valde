@@ -13,14 +13,14 @@ function tex(c, repeat = true, srgb = true) {
 
 // Mampostería de piedra típica de la Carballeda: lajas de cuarcita y pizarra ocres y rojizas,
 // planas y alargadas, con mucho mortero claro entre ellas (según las capturas de Street View de Valde).
-function drawStone(g, w, h, r, palette) {
-  g.fillStyle = '#a99d8a'; g.fillRect(0, 0, w, h);
+function drawStone(g, w, h, r, palette, k = 1, mortar = '#a99d8a') {
+  g.fillStyle = mortar; g.fillRect(0, 0, w, h);
   for (let i = 0; i < 2500; i++) { const v = r() < 0.5 ? 'rgba(70,60,50,0.10)' : 'rgba(235,228,214,0.12)'; g.fillStyle = v; g.fillRect(r() * w, r() * h, 1 + r() * 3, 1 + r() * 3); }
   let y = -4;
   while (y < h) {
-    const rowH = 9 + r() * 14; let x = -r() * 40;
+    const rowH = (9 + r() * 14) * k; let x = -r() * 40 * k;
     while (x < w) {
-      const sw = 22 + r() * 52, sh = rowH * (0.7 + r() * 0.35);
+      const sw = (22 + r() * 52) * k, sh = rowH * (0.7 + r() * 0.35);
       const c = palette[Math.floor(r() * palette.length)];
       const v = (r() - 0.5) * 26;
       g.fillStyle = `rgb(${c[0] + v | 0},${c[1] + v | 0},${c[2] + v | 0})`;
@@ -41,25 +41,42 @@ function drawStone(g, w, h, r, palette) {
 
 const STONE = [[184, 128, 88], [166, 112, 76], [156, 124, 96], [134, 112, 92], [182, 150, 116], [118, 102, 88], [160, 100, 66], [196, 162, 126], [146, 136, 122], [128, 120, 110]];
 
-function drawWindow(g, x, y, w, h, r) {
-  // dintel y jambas de piedra, contraventanas de madera
-  g.fillStyle = '#8f8576'; g.fillRect(x - 10, y - 14, w + 20, h + 26); // dintel, jambas y alféizar de piedra
-  g.fillStyle = '#1d1f22'; g.fillRect(x, y, w, h);
-  g.fillStyle = 'rgba(120,150,170,0.35)'; g.fillRect(x + 3, y + 3, w / 2 - 4, h - 6); g.fillRect(x + w / 2 + 1, y + 3, w / 2 - 4, h - 6);
-  g.fillStyle = '#e8e2d4'; g.fillRect(x + w / 2 - 1, y, 2, h); g.fillRect(x, y + h / 2 - 1, w, 2);
-  const wood = r() < 0.5 ? '#5b3b22' : '#3f5a3a';
-  const sw = Math.round(w * 0.42); g.fillStyle = wood; g.fillRect(x - sw - 4, y, sw, h); g.fillRect(x + w + 4, y, sw, h);
-  g.fillStyle = 'rgba(0,0,0,0.25)';
-  for (let i = 0; i < h; i += 8) { g.fillRect(x - sw - 4, y + i, sw, 2); g.fillRect(x + w + 4, y + i, sw, 2); }
+// recercado de ladrillo macizo rojo alrededor de puertas y ventanas (como en la calle Arriba)
+// fachadas: piedra más grande, granito pardo y cuarcita, con mortero ancho
+const GRANITE = [[150, 130, 110], [132, 116, 98], [170, 140, 104], [118, 106, 94], [176, 150, 120], [108, 96, 86], [160, 120, 84], [140, 122, 100]];
+function brickFrame(g, x, y, w, h, r, t = 30) {
+  g.fillStyle = '#c9b49a'; g.fillRect(x - t, y - t, w + 2 * t, h + t + 6);
+  for (let yy = y - t, row = 0; yy < y + h + 6; yy += 9, row++) for (let xx = x - t - (row % 2) * 14; xx < x + w + t; xx += 28) {
+    const inside = xx + 26 > x && xx < x + w && yy + 8 > y && yy < y + h; if (inside) continue;
+    const v = (r() - 0.5) * 34; g.fillStyle = `rgb(${182 + v | 0},${96 + v * 0.5 | 0},${66 + v * 0.4 | 0})`;
+    g.fillRect(Math.max(x - t, xx) + 1, yy + 1, Math.min(26, x + w + t - xx - 1), 7);
+  }
+}
+function drawWindow(g, x, y, w, h, r, grille = false) {
+  brickFrame(g, x, y, w, h, r);
+  g.fillStyle = '#b8b2a6'; g.fillRect(x - 6, y + h, w + 12, 8); // alféizar
+  if (r() < 0.45) { // persiana enrollable blanca medio bajada
+    g.fillStyle = '#1d1f22'; g.fillRect(x, y, w, h);
+    const d = h * (0.45 + r() * 0.5); g.fillStyle = '#e9e7e1'; g.fillRect(x, y, w, d);
+    g.fillStyle = 'rgba(0,0,0,0.12)'; for (let i = 4; i < d; i += 5) g.fillRect(x, y + i, w, 1);
+    g.fillStyle = '#6b4223'; g.fillRect(x, y + d, w, 3);
+  } else { // ventana de madera de dos hojas
+    g.fillStyle = '#6b4223'; g.fillRect(x, y, w, h);
+    for (const gx of [x + 6, x + w / 2 + 3]) { const gr = g.createLinearGradient(0, y, 0, y + h); gr.addColorStop(0, '#6f8798'); gr.addColorStop(0.5, '#34414c'); gr.addColorStop(1, '#262d33'); g.fillStyle = gr; g.fillRect(gx, y + 6, w / 2 - 9, h - 12); }
+    
+    g.fillStyle = '#6b4223'; g.fillRect(x + 6, y + h / 2 - 2, w - 12, 4);
+  }
+  if (grille) { g.fillStyle = '#2a2420'; for (let i = 8; i < w; i += 13) g.fillRect(x + i, y - 2, 3, h + 4); g.fillRect(x, y + 10, w, 3); g.fillRect(x, y + h - 12, w, 3); }
 }
 
 function drawDoor(g, x, y, w, h, r) {
-  g.fillStyle = '#8f8576'; g.fillRect(x - 12, y - 16, w + 24, h + 16);
-  const c = ['#4a2f1c', '#5e3d22', '#2f3f2c', '#6b4a2b'][Math.floor(r() * 4)];
-  g.fillStyle = c; g.fillRect(x, y, w, h);
-  g.fillStyle = 'rgba(0,0,0,0.3)';
-  for (let i = 14; i < w; i += 18) g.fillRect(x + i, y, 3, h);
-  g.fillStyle = '#222'; g.fillRect(x + w - 18, y + h * 0.5, 8, 8);
+  brickFrame(g, x, y, w, h, r);
+  const c = ['#8a5a30', '#6e4526', '#7a4a2a', '#5e3d22'][Math.floor(r() * 4)];
+  g.fillStyle = '#20262c'; g.fillRect(x, y, w, 26); // montante acristalado
+  g.fillStyle = c; g.fillRect(x, y + 26, w, h - 26);
+  g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(x + w / 2 - 1, y + 26, 2, h - 26);
+  for (const ox of [8, w / 2 + 8]) for (let k = 0; k < 3; k++) { g.strokeStyle = 'rgba(0,0,0,0.3)'; g.lineWidth = 2; g.strokeRect(x + ox, y + 40 + k * ((h - 50) / 3), w / 2 - 16, (h - 50) / 3 - 10); }
+  g.fillStyle = '#c9a640'; g.fillRect(x + w / 2 + 6, y + h * 0.55, 10, 4);
 }
 
 export function makeTextures(renderer) {
@@ -68,10 +85,10 @@ export function makeTextures(renderer) {
 
   // Fachadas a escala real: cada textura es una planta de 4 m x 3 m (128 px por metro).
   // Ventanas de 0,9 x 1,2 m con alféizar a 0,9 m; puertas de 1 x 2,2 m.
-  const upper = (g, r) => { drawWindow(g, 210, 120, 100, 130, r); };
+  const upper = (g, r) => { drawWindow(g, 200, 110, 110, 160, r); };
   // la planta baja mide 8 m: una puerta y dos ventanas pequeñas (las casas del pueblo tienen pocos huecos)
-  const ground = (g, r) => { drawDoor(g, 120, 102, 128, 282, r); drawWindow(g, 470, 125, 90, 115, r); drawWindow(g, 830, 125, 90, 115, r); };
-  const stoneBase = (g, r, w) => drawStone(g, w, 384, r, STONE);
+  const ground = (g, r) => { drawDoor(g, 120, 102, 150, 282, r); drawWindow(g, 470, 120, 105, 150, r, true); drawWindow(g, 830, 120, 105, 150, r, true); };
+  const stoneBase = (g, r, w) => drawStone(g, w, 384, r, GRANITE, 1.7, '#bfae92');
   const plasterBase = (g, r, w) => {
     g.fillStyle = '#d9cfbd'; g.fillRect(0, 0, w, 384);
     for (let i = 0; i < 8000; i++) { g.fillStyle = `rgba(${r() < .5 ? 0 : 255},${r() < .5 ? 0 : 240},200,0.05)`; g.fillRect(r() * w, r() * 384, 2 + r() * 5, 2 + r() * 5); }
@@ -88,8 +105,15 @@ export function makeTextures(renderer) {
     const [ce, ge] = canvas(W / 4, 96); ge.fillStyle = '#000'; ge.fillRect(0, 0, W / 4, 96);
     const glow = (x, y, w, h) => { const gr = ge.createRadialGradient((x + w / 2) / 4, (y + h / 2) / 4, 2, (x + w / 2) / 4, (y + h / 2) / 4, h / 5);
       gr.addColorStop(0, '#ffd890'); gr.addColorStop(1, '#c87a30'); ge.fillStyle = gr; ge.fillRect(x / 4, y / 4, w / 4, h / 4); };
-    if (openFn === upper) glow(210, 120, 100, 130); else { glow(470, 125, 90, 115); glow(830, 125, 90, 115); }
+    if (openFn === upper) glow(200, 110, 110, 160); else { glow(470, 120, 105, 150); glow(830, 120, 105, 150); }
     out[name + 'Night'] = tex(ce);
+  }
+  // ladrillo macizo (cornisa bajo el alero y recercados)
+  {
+    const [c, g] = canvas(256, 64); const r = rng(77);
+    g.fillStyle = '#cdb89c'; g.fillRect(0, 0, 256, 64);
+    for (let y = 0, row = 0; y < 64; y += 9, row++) for (let x = -(row % 2) * 14; x < 256; x += 28) { const v = (r() - 0.5) * 34; g.fillStyle = `rgb(${182 + v | 0},${96 + v * 0.5 | 0},${66 + v * 0.4 | 0})`; g.fillRect(x + 1, y + 1, 26, 7); }
+    out.brick = tex(c);
   }
   // Sillería de granito (iglesia)
   {
@@ -117,8 +141,8 @@ export function makeTextures(renderer) {
     for (let y = 0; y < 256; y += 16) for (let x = 0; x < 256; x += 16) {
       const v = (r() - 0.5) * 40, off = (y / 16) % 2 ? 8 : 0;
       const gr = g.createLinearGradient(x + off, 0, x + off + 16, 0);
-      gr.addColorStop(0, `rgb(${120 + v},${52 + v / 2},${34 + v / 3})`);
-      gr.addColorStop(0.5, `rgb(${178 + v},${88 + v / 2},${58 + v / 3})`);
+      gr.addColorStop(0, `rgb(${132 + v},${64 + v / 2},${42 + v / 3})`);
+      gr.addColorStop(0.5, `rgb(${192 + v},${106 + v / 2},${70 + v / 3})`);
       gr.addColorStop(1, `rgb(${110 + v},${48 + v / 2},${30 + v / 3})`);
       g.fillStyle = gr; g.fillRect(x + off, y, 15, 15);
       g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(x + off, y + 14, 16, 2);

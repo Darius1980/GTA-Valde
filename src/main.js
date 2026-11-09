@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { Input } from './input.js';
 import { makeTextures } from './textures.js';
-import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, buildPlaza, Trees, smoothRoads, villageMask } from './world.js';
+import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, buildPlaza, Trees, smoothRoads, villageMask, yardWalls } from './world.js';
 import { Animals } from './animals.js';
 import { Player } from './player.js';
 import { Car } from './car.js';
@@ -69,9 +69,10 @@ async function load(map) {
   scene.add(buildPlaza(data, terrain, colliders));
   let bellTower = null; buildings.traverse(o => { if (o.userData.bellTower) bellTower = o.userData.bellTower; });
   const roads = buildRoads(data, terrain, tex, colliders); scene.add(roads);
-  scene.add(buildWalls(data, terrain, tex, colliders));
   // la gasolinera y el concesionario necesitan el terreno libre de árboles
   const sites = findShopSites(data, data.plaza?.start || data.spawn, colliders);
+  if (data.style !== 'urban' && !data.walls.length) data.walls = yardWalls(data, colliders, [sites.gas, sites.shop, sites.taller?.b].filter(Boolean));
+  scene.add(buildWalls(data, terrain, tex, colliders));
   const clearR = [[sites.gas, 13], [sites.shop, 15]].filter(([s]) => s);
   data.trees = data.trees.filter(([x, z]) => !clearR.some(([s, r]) => Math.hypot(x - s.x, z - s.z) < r));
   const trees = new Trees(data, terrain, tex, colliders); scene.add(trees.group);

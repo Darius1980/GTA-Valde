@@ -156,7 +156,7 @@ export function buildBuildings(data, terrain, tex, colliders) {
   const urban = data.style === 'urban';
   const facade = new GeoBuilder(), plaster = new GeoBuilder(), facadeGround = new GeoBuilder(), plasterGround = new GeoBuilder(), stone = new GeoBuilder(), roof = new GeoBuilder(), eaves = new GeoBuilder(), flat = new GeoBuilder();
   const urbanB = (tex.urban || []).map(() => new GeoBuilder()), groundB = (tex.urbanGround || []).map(() => new GeoBuilder());
-  const ashlar = new GeoBuilder(); let church = null;
+  const ashlar = new GeoBuilder(), brick = new GeoBuilder(); let church = null; const chimneys = [];
   let seed = 1; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   for (const b of data.buildings) {
     let pts = b.p.slice(); if (signedArea(pts) > 0) pts.reverse(); // orden que deja la normal de los muros hacia fuera
@@ -184,12 +184,13 @@ export function buildBuildings(data, terrain, tex, colliders) {
       const k = Math.floor(rnd() * urbanB.length); wallB = urbanB[k]; tileW = 3; tileH = floorH;
       if (b.use !== 'ind' && floors >= 3) gB = groundB[Math.floor(rnd() * groundB.length)];
     } else if (b.use === 'agr') wallB = stone;
-    else { const k = rnd() < 0.3 ? 1 : 0; wallB = k ? plaster : facade; gB = k ? plasterGround : facadeGround; }
+    else { const k = rnd() < 0.35 ? 1 : 0; wallB = k ? plaster : facade; gB = k ? (floors > 1 && rnd() < 0.7 ? facadeGround : plasterGround) : facadeGround; } // revocadas arriba y de piedra abajo, como en la calle del Río
     const t = 0.82 + rnd() * 0.25;
     for (const gb of [facade, plaster, facadeGround, plasterGround, stone, ashlar, ...urbanB, ...groundB]) gb.tint = [t, t * (0.97 + rnd() * 0.05), t * (0.95 + rnd() * 0.05)];
     const age = rnd(); roof.tint = [0.75 + 0.3 * (1 - age), 0.72 + 0.25 * (1 - age) + 0.08 * age, 0.7 + 0.2 * age];
     const gH = urban ? 3.6 : 3.0, gTop = top + gH; // planta baja
     const u0 = rnd(); // la puerta cae en un sitio distinto en cada casa
+    const cornice = rnd() < 0.5; let ccx = 0, ccz = 0; for (const p of pts) { ccx += p[0] / pts.length; ccz += p[1] / pts.length; }
     const parapet = isFlat ? 0.9 : 0;
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i], c = pts[(i + 1) % pts.length];
@@ -213,6 +214,13 @@ export function buildBuildings(data, terrain, tex, colliders) {
             [u0 + lp / 8, 0], [u0 + lq / 8, 0], [u0 + lq / 8, 1], [u0 + lp / 8, 1]);
           if (rows > 1) wallB.quad([p[0], rBot + tileH, p[1]], [q[0], rBot + tileH, q[1]], [q[0], wTop, q[1]], [p[0], wTop, p[1]],
             [lp * uScale, 0], [lq * uScale, 0], [lq * uScale, rows - 1], [lp * uScale, rows - 1]);
+          // cornisa de ladrillo bajo el alero (en la mitad de las casas), un pelín salida del muro
+          if (cornice) {
+          const ex = q[0] - p[0], ez = q[1] - p[1], el = Math.hypot(ex, ez) || 1; let ox = ez / el, oz = -ex / el;
+          if ((p[0] - ccx) * ox + (p[1] - ccz) * oz < 0) { ox = -ox; oz = -oz; }
+          const o = 0.04, P0 = [p[0] + ox * o, p[1] + oz * o], Q0 = [q[0] + ox * o, q[1] + oz * o];
+          brick.quad([P0[0], wTop - 0.36, P0[1]], [Q0[0], wTop - 0.36, Q0[1]], [Q0[0], wTop, Q0[1]], [P0[0], wTop, P0[1]], [lp / 2, 0], [lq / 2, 0], [lq / 2, 0.75], [lp / 2, 0.75]);
+          }
         } else if (gB && gTop < wTop - (urban ? 2 : 0.4)) {
           // planta baja con su textura; encima, las plantas de viviendas alineadas desde arriba
           const gu = (urban ? Math.max(1, Math.round(L / 4)) : nTiles) / L;
@@ -270,6 +278,11 @@ export function buildBuildings(data, terrain, tex, colliders) {
         if (uz * wx - ux * wz < 0) roof.tri(V[0], V[2], V[1], U[0], U[2], U[1]); else roof.tri(V[0], V[1], V[2], U[0], U[1], U[2]);
       }
     }
+    if (!urban && !isChurch && b.use === 'res' && rnd() < 0.75) { // chimenea encalada con sombrerete, a un lado de la cumbrera
+      const along = (rnd() - 0.5) * length * 0.6, side = (rnd() - 0.5) * half * 0.8;
+      const hx = ccx + rx * along + nx * side, hz = ccz + rz * along + nz * side;
+      chimneys.push([hx, roofY(hx, hz), hz, rnd() < 0.6]);
+    }
     for (let i = 0; i < grown.length; i++) {
       const a = grown[i], c = grown[(i + 1) % grown.length];
       const ha = roofY(a[0], a[1]) + 0.05, hc = roofY(c[0], c[1]) + 0.05;
@@ -290,7 +303,26 @@ export function buildBuildings(data, terrain, tex, colliders) {
   add(flat, new THREE.MeshStandardMaterial({ map: tex.flatRoof, roughness: 1, vertexColors: true }));
   add(roof, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.roof, roughness: 0.8, side: THREE.DoubleSide }));
   add(eaves, new THREE.MeshStandardMaterial({ color: 0x5a2c1c, roughness: 0.9, side: THREE.DoubleSide }));
+  add(brick, new THREE.MeshStandardMaterial({ map: tex.brick, roughness: 0.9 }));
+  if (chimneys.length) group.add(roofExtras(chimneys));
   return group;
+}
+// chimeneas blancas con sombrerete y antenas de televisión en los tejados
+function roofExtras(list) {
+  const g = new THREE.Group(), M = new THREE.Matrix4(), one = new THREE.Vector3(1, 1, 1), q = new THREE.Quaternion();
+  const stack = new THREE.BoxGeometry(0.55, 1.4, 0.55); stack.translate(0, 0.55, 0);
+  const cap = new THREE.BoxGeometry(0.75, 0.08, 0.75); cap.translate(0, 1.55, 0);
+  const pipe = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 6); pipe.translate(0, 1.6, 0);
+  const white = new THREE.InstancedMesh(stack, new THREE.MeshStandardMaterial({ color: 0xeeeae2, roughness: 0.9 }), list.length);
+  const caps = new THREE.InstancedMesh(mergeGeometries([cap, pipe]), new THREE.MeshStandardMaterial({ color: 0x9a9da0, metalness: 0.6, roughness: 0.4 }), list.length);
+  const ants = list.filter(c => c[3]);
+  const mast = new THREE.CylinderGeometry(0.025, 0.025, 2.6, 4); mast.translate(0.9, 1.3, 0);
+  const boom = new THREE.BoxGeometry(0.03, 0.03, 1.2); boom.translate(0.9, 2.4, 0);
+  const els = [0, 1, 2, 3].map(k => { const e = new THREE.BoxGeometry(0.5 - k * 0.07, 0.02, 0.02); e.translate(0.9, 2.42, -0.5 + k * 0.33); return e; });
+  const ant = new THREE.InstancedMesh(mergeGeometries([mast, boom, ...els]), new THREE.MeshStandardMaterial({ color: 0x777b80, metalness: 0.7, roughness: 0.4 }), ants.length);
+  list.forEach(([x, y, z], i) => { q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), (x * 7 + z * 3) % 6.28); M.compose(new THREE.Vector3(x, y - 0.2, z), q, one); white.setMatrixAt(i, M); caps.setMatrixAt(i, M); });
+  ants.forEach(([x, y, z], i) => { q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), (x * 5 + z) % 6.28); M.compose(new THREE.Vector3(x, y - 0.2, z), q, one); ant.setMatrixAt(i, M); });
+  white.castShadow = true; g.add(white, caps, ant); return g;
 }
 
 // Espadaña (campanario de muro típico de Zamora), portada y campanas
@@ -500,14 +532,14 @@ function utilityPoles(data, terrain, colliders) {
   const [cx, cz] = data.plaza?.start || data.spawn, H = 7.2, poles = [], wires = [];
   for (const r of data.roads) {
     if (!['residential', 'living_street', 'tertiary', 'unclassified'].includes(r.k)) continue;
-    const P = densify(r.p, 2); let dist = 0, next = 6, prev = null;
+    const P = densify(r.p, 2); let dist = 0, next = 6, prev = null; const conc = Math.abs(Math.round(r.p[0][0] * 13 + r.p[0][1] * 7)) % 2;
     for (let i = 0; i < P.length - 1; i++) {
       const a = P[i], b = P[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]); dist += L;
       if (dist < next || Math.hypot(a[0] - cx, a[1] - cz) > 300) continue;
       const n = sideNormal(P, i); let spot = null;
       for (const side of [1, -1]) {
         const o = r.w / 2 + 0.45, x = a[0] + n[0] * o * side, z = a[1] + n[1] * o * side;
-        if (!colliders.nearest(x, z, 0.6) && !poles.some(p => Math.hypot(p[0] - x, p[1] - z) < 12)) { spot = [x, z, Math.atan2(-n[0] * side, -n[1] * side)]; break; }
+        if (!colliders.nearest(x, z, 0.6) && !poles.some(p => Math.hypot(p[0] - x, p[1] - z) < 12)) { spot = [x, z, Math.atan2(-n[0] * side, -n[1] * side), conc]; break; }
       }
       if (!spot) { next = dist + 4; continue; }
       poles.push(spot); next = dist + 30 + (poles.length % 3) * 4;
@@ -522,14 +554,21 @@ function utilityPoles(data, terrain, colliders) {
   const head = new THREE.BoxGeometry(0.22, 0.1, 0.5); head.translate(0, H - 1.42, 1.45);
   const wood = new THREE.MeshStandardMaterial({ color: 0x4d3b2a, roughness: 1 }), metal = new THREE.MeshStandardMaterial({ color: 0x8a8d90, roughness: 0.5, metalness: 0.5 });
   const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff4d8, emissive: 0xffd8a0, emissiveIntensity: 0, roughness: 0.3 }); night.lamps.push(lampMat);
-  const ip = new THREE.InstancedMesh(mergeGeometries([pole, cross]), wood, poles.length), ia = new THREE.InstancedMesh(arm, metal, poles.length), ih = new THREE.InstancedMesh(head, lampMat, poles.length);
+  // unos de madera y otros de hormigón (los más nuevos), por calles
+  const concrete = new THREE.MeshStandardMaterial({ color: 0xb4b2ac, roughness: 0.95 });
+  const kind = poles.map(p => p[3]), nW = kind.filter(k => !k).length;
+  const sq = new THREE.BoxGeometry(0.2, H, 0.16); sq.translate(0, H / 2, 0);
+  const ipW = new THREE.InstancedMesh(mergeGeometries([pole, cross]), wood, Math.max(1, nW)), ipC = new THREE.InstancedMesh(mergeGeometries([sq, cross.clone()]), concrete, Math.max(1, poles.length - nW));
+  ipW.count = nW; ipC.count = poles.length - nW; 
+  let iW = 0, iC = 0;
+  const ia = new THREE.InstancedMesh(arm, metal, poles.length), ih = new THREE.InstancedMesh(head, lampMat, poles.length);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
   poles.forEach(([x, z, rot], i) => {
     q.setFromAxisAngle(up, rot); m.compose(new THREE.Vector3(x, terrain.height(x, z), z), q, one);
-    ip.setMatrixAt(i, m); ia.setMatrixAt(i, m); ih.setMatrixAt(i, m);
+    (kind[i] ? ipC : ipW).setMatrixAt(kind[i] ? iC++ : iW++, m); ia.setMatrixAt(i, m); ih.setMatrixAt(i, m);
     colliders.addSegment(x - 0.12, z, x + 0.12, z, 'tree');
   });
-  ip.castShadow = true; g.add(ip, ia, ih);
+  ipW.castShadow = ipC.castShadow = true; g.add(ipW, ipC, ia, ih);
   // dos cables por vano, a los extremos de la cruceta, con su catenaria
   const pts = [];
   for (const [a, b] of wires) for (const off of [-0.4, 0.4]) {
@@ -556,6 +595,33 @@ function sideNormal(P, i) {
 }
 
 // ---------- muros de piedra seca ----------
+// tapias de piedra de huertos y corrales: donde la calle del pueblo no tiene fachada al lado,
+// un muro bajo a 0,6 m del borde, en tramos con huecos para pasar (no vienen en el Catastro)
+export function yardWalls(data, colliders, avoid = []) {
+  const [cx, cz] = data.plaza?.start || data.spawn, out = [];
+  const pave = data.roads.filter(r => r.k !== 'path');
+  const grid = new Map(), C = 8, key = (x, z) => `${Math.floor(x / C)},${Math.floor(z / C)}`;
+  for (const r of pave) { const P = densify(r.p, 1.5); for (const p of P) { const k = key(p[0], p[1]); if (!grid.has(k)) grid.set(k, []); grid.get(k).push([p[0], p[1], r.w / 2]); } }
+  const onRoad = (x, z) => { const i = Math.floor(x / C), j = Math.floor(z / C); for (let a = i - 1; a <= i + 1; a++) for (let b = j - 1; b <= j + 1; b++) for (const [px, pz, hw] of grid.get(`${a},${b}`) || []) if (Math.hypot(px - x, pz - z) < hw + 1.2) return true; return false; };
+  let seed = 11; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (const r of data.roads) {
+    if (r.k !== 'residential' && r.k !== 'living_street') continue;
+    const P = densify(r.p, 2);
+    for (const side of [1, -1]) {
+      let run = [], maxLen = 8 + rnd() * 10;
+      const flush = () => { if (run.length >= 3) out.push({ p: run, h: 1.0 + rnd() * 0.5 }); run = []; maxLen = 6 + rnd() * 12; };
+      for (let i = 0; i < P.length; i++) {
+        const n = sideNormal(P, Math.min(i, P.length - 2)), o = r.w / 2 + 0.6, x = P[i][0] + n[0] * o * side, z = P[i][1] + n[1] * o * side;
+        const ok = Math.hypot(x - cx, z - cz) > 45 && Math.hypot(x - cx, z - cz) < 280 && !colliders.nearest(x, z, 2.2) && !onRoad(x, z) && !avoid.some(s => Math.hypot(s.x - x, s.z - z) < 20);
+        if (!ok) { flush(); continue; }
+        run.push([x, z]);
+        if ((run.length - 1) * 2 >= maxLen) { flush(); i += 1 + (rnd() * 2 | 0); } // hueco de 2-4 m: portillo
+      }
+      flush();
+    }
+  }
+  return out;
+}
 export function buildWalls(data, terrain, tex, colliders) {
   const gb = new GeoBuilder();
   for (const w of data.walls) {
