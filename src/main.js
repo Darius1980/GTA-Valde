@@ -290,7 +290,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     for (const c of cars) if (c !== driving && !c.police) {
       c.update(dt, null);
       // los coches que llegan a un callejón sin salida o al borde del mapa reaparecen lejos del jugador
-      if (c.ai?.f?.deadEnd && c.pos.distanceTo(player.inCar ? driving.pos : player.pos) > 90) aiSpawn(c);
+      if (c.ai?.f?.deadEnd && c.pos.distanceTo(player.inCar ? player.inCar.pos : player.pos) > 90) aiSpawn(c);
     }
     const focus = flying ? flying.pos : driving ? driving.pos : player.pos;
     // coches dañados abandonados: a los 5 minutos sin nadie al volante desaparecen y sale uno nuevo
