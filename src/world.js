@@ -6,7 +6,25 @@ export class Terrain {
   constructor(meta, heights) {
     this.n = meta.n; this.cell = meta.cell; this.ox = meta.origin[0]; this.oz = meta.origin[1]; this.h = heights;
   }
+  // entorno lejano (radio de 10 km): rejilla gruesa cuyas líneas caen justo en el borde de esta
+  setOuter(meta, h) { this.o = { n: meta.n, cell: meta.cell, ox: meta.origin[0], oz: meta.origin[1], h }; this.E = -this.ox; }
+  outerHeight(x, z) {
+    const o = this.o, n = o.n, h = o.h;
+    const fx = Math.max(0, Math.min(n - 1.0001, (x - o.ox) / o.cell)), fz = Math.max(0, Math.min(n - 1.0001, (z - o.oz) / o.cell));
+    const i = Math.floor(fx), j = Math.floor(fz), u = fx - i, v = fz - j;
+    const a = h[j * n + i], b = h[j * n + i + 1], c = h[(j + 1) * n + i], d = h[(j + 1) * n + i + 1];
+    // mismos triángulos que la malla (diagonal b-c): el coche y las carreteras pisan justo el suelo dibujado
+    return u + v <= 1 ? a + (b - a) * u + (c - a) * v : d + (c - d) * (1 - u) + (b - d) * (1 - v);
+  }
   height(x, z) {
+    if (!this.o) return this.innerHeight(x, z);
+    const m = Math.max(Math.abs(x), Math.abs(z)), E = this.E;
+    if (m <= E - 150) return this.innerHeight(x, z);
+    const ho = this.outerHeight(x, z); if (m >= E) return ho;
+    const t = (m - (E - 150)) / 150, k = t * t * (3 - 2 * t), hi = this.innerHeight(x, z);
+    return hi + (ho - hi) * k;
+  }
+  innerHeight(x, z) {
     const fx = (x - this.ox) / this.cell, fz = (z - this.oz) / this.cell;
     const i = Math.max(0, Math.min(this.n - 2, Math.floor(fx))), j = Math.max(0, Math.min(this.n - 2, Math.floor(fz)));
     const u = Math.max(0, Math.min(1, fx - i)), v = Math.max(0, Math.min(1, fz - j)), n = this.n, h = this.h;
@@ -484,16 +502,17 @@ export function buildRoads(data, terrain, tex, colliders) {
       }
     }
   }
+  const step = data.step || 2.5, lift = data.lift ?? 0.08;
   for (const r of data.roads) {
     const gb = byMat[r.s] || byMat.asphalt; const hw = r.w / 2;
-    const P = densify(r.p, 2.5); let dist = 0;
+    const P = densify(r.p, step); let dist = 0;
     for (let i = 0; i < P.length - 1; i++) {
       const a = P[i], b = P[i + 1];
       const na = sideNormal(P, i), nb = sideNormal(P, i + 1);
       const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
       const pa = [a[0] + na[0] * hw, a[1] + na[1] * hw], qa = [a[0] - na[0] * hw, a[1] - na[1] * hw];
       const pb = [b[0] + nb[0] * hw, b[1] + nb[1] * hw], qb = [b[0] - nb[0] * hw, b[1] - nb[1] * hw];
-      const y = (p) => terrain.height(p[0], p[1]) + 0.08;
+      const y = (p) => terrain.height(p[0], p[1]) + lift;
       const us = r.w / 4;
       gb.quad([qa[0], y(qa), qa[1]], [pa[0], y(pa), pa[1]], [pb[0], y(pb), pb[1]], [qb[0], y(qb), qb[1]],
         [0, dist / 4], [us, dist / 4], [us, (dist + L) / 4], [0, (dist + L) / 4]);
@@ -511,12 +530,12 @@ export function buildRoads(data, terrain, tex, colliders) {
   // líneas de la carretera nacional
   const lines = new GeoBuilder();
   for (const r of data.roads) if (r.lines) {
-    const P = densify(r.p, 2.5);
+    const P = densify(r.p, step);
     for (let i = 0; i < P.length - 1; i++) {
       for (const off of [-r.w / 2 + 0.3, r.w / 2 - 0.3]) {
         const a = P[i], b = P[i + 1], na = sideNormal(P, i), nb = sideNormal(P, i + 1);
         const A = [a[0] + na[0] * off, a[1] + na[1] * off], B = [b[0] + nb[0] * off, b[1] + nb[1] * off];
-        const w = 0.07, y = (p) => terrain.height(p[0], p[1]) + 0.1;
+        const w = 0.07, y = (p) => terrain.height(p[0], p[1]) + lift + 0.02;
         lines.quad([A[0] - na[0] * w, y(A), A[1] - na[1] * w], [A[0] + na[0] * w, y(A), A[1] + na[1] * w], [B[0] + nb[0] * w, y(B), B[1] + nb[1] * w], [B[0] - nb[0] * w, y(B), B[1] - nb[1] * w], [0, 0], [1, 0], [1, 1], [0, 1]);
       }
     }
@@ -692,7 +711,7 @@ export function buildWalls(data, terrain, tex, colliders) {
 }
 
 // ---------- árboles (encinas y robles) instanciados con dos niveles de detalle ----------
-function crownGeometry(detail, lobes) {
+export function crownGeometry(detail, lobes) {
   const g = mergeGeometries(Array.from({ length: lobes }, (_, k) => {
     const g = new THREE.IcosahedronGeometry(1, detail); const p = g.attributes.position;
     let s = k * 97 + 3; const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
@@ -763,8 +782,11 @@ export function buildTerrain(meta, terrain, orthoFull, orthoCenter, tex, mask = 
   const p = geo.attributes.position;
   for (let i = 0; i < p.count; i++) p.setY(i, terrain.height(p.getX(i), p.getZ(i)));
   geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, terrainMaterial(orthoFull, orthoCenter, meta.ortho.full, meta.ortho.center, tex, mask)); mesh.receiveShadow = true;
+  return mesh;
+}
+export function terrainMaterial(orthoFull, orthoCenter, fb, cb, tex, mask = null) {
   const mat = new THREE.MeshStandardMaterial({ map: orthoFull, roughness: 1 });
-  const fb = meta.ortho.full, cb = meta.ortho.center;
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.tCenter = { value: orthoCenter }; sh.uniforms.tDetail = { value: tex.detail };
     sh.uniforms.tMask = { value: mask?.tex || null }; sh.uniforms.maskB = { value: mask?.bounds || new THREE.Vector4(0, 0, 1, 1) }; sh.uniforms.tAsph = { value: tex.asphalt }; sh.uniforms.tConc = { value: tex.concrete }; sh.uniforms.tDirt = { value: tex.dirt };
@@ -797,8 +819,8 @@ export function buildTerrain(meta, terrain, orthoFull, orthoCenter, tex, mask = 
       }` : ''}
       diffuseColor *= col;`);
   };
-  const mesh = new THREE.Mesh(geo, mat); mesh.receiveShadow = true;
-  return mesh;
+  mat.customProgramCacheKey = () => 'terrain' + (mask ? 'm' : '');
+  return mat;
 }
 
 // ---------- curvas redondeadas: recorte de esquinas (Chaikin) sin mover cruces ni extremos ----------

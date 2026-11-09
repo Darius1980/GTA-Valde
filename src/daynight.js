@@ -38,6 +38,7 @@ function moonTexture(phase) {
 
 export class DayNight {
   constructor({ scene, sky, sun, hemi, renderer, isMobile }) {
+    this.viewFar = isMobile ? 2000 : 2800; this.far = this.viewFar;
     Object.assign(this, { scene, sky, sun, hemi, renderer });
     this.hour = 12;                // empieza a mediodía
     this.minutesPerHour = 50 / 60; // 1 hora de juego = 50 s reales (la noche cerrada pasa el doble de rápido)
@@ -142,7 +143,8 @@ export class DayNight {
     this.hemi.color.setRGB(0.75 - 0.27 * this.n, 0.83 - 0.22 * this.n, 0.93 - 0.08 * this.n);
     const fog = this.scene.fog;
     fog.color.copy(DAY_FOG).lerp(DUSK_FOG, dusk * 0.7).lerp(NIGHT_FOG, this.n);
-    fog.near = 250 - 110 * this.n; fog.far = 1600 - 650 * this.n;
+    // con el entorno de 10 km se ve más lejos de día; de noche, como antes
+    fog.near = 300 - 160 * this.n; fog.far = this.far = this.viewFar - (this.viewFar - 950) * this.n;
     this.renderer.toneMappingExposure = 0.9 + 0.05 * this.n;
 
     // estrellas y luna

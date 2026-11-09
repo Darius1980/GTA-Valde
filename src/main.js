@@ -19,6 +19,7 @@ import { Shops, findShopSites } from './shops.js';
 import { Jobs } from './jobs.js';
 import { Plaza } from './fiesta.js';
 import { Interiors } from './interiors.js';
+import { Outer } from './outer.js';
 
 const isMobile = matchMedia('(pointer: coarse)').matches;
 const canvas = document.getElementById('game');
@@ -54,11 +55,16 @@ async function load(map) {
   progress(0.3, 'Cargando ortofoto…');
   const tl = new THREE.TextureLoader();
   const loadTex = (f) => new Promise(res => tl.load(base + f, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); res(t); }));
+  // entorno lejano (radio de 10 km), si el mapa lo tiene
+  const outerP = Promise.all([fetch(base + 'outer.json').then(r => r.ok ? r.json() : null), fetch(base + 'terrain_outer.json').then(r => r.ok ? r.json() : null)]).catch(() => [null, null]);
   const [oFull, oCenter] = await Promise.all([loadTex(data.ortho.full.file), loadTex(data.ortho.center.file)]);
+  const [odata, ohbuf] = await outerP;
+  const oOuter = odata && ohbuf ? await loadTex(odata.ortho.file) : null;
   progress(0.6, 'Construyendo el pueblo…');
   await new Promise(r => setTimeout(r, 20));
   const tex = makeTextures(renderer);
   const terrain = new Terrain(data.terrain, Float32Array.from(hbuf.h, v => v * hbuf.scale));
+  if (oOuter) terrain.setOuter(odata.terrain, Float32Array.from(ohbuf.h, v => v * ohbuf.scale));
   data.terrain.ortho = data.ortho; // límites para el shader
   const meta = { ...data.terrain, ortho: { full: data.ortho.full.bounds, center: data.ortho.center.bounds } };
   smoothRoads(data.roads); // curvas redondeadas
@@ -76,12 +82,13 @@ async function load(map) {
   const clearR = [[sites.gas, 13], [sites.shop, 15]].filter(([s]) => s);
   data.trees = data.trees.filter(([x, z]) => !clearR.some(([s, r]) => Math.hypot(x - s.x, z - s.z) < r));
   const trees = new Trees(data, terrain, tex, colliders); scene.add(trees.group);
+  const outer = oOuter ? new Outer({ data: odata, terrain, tex, colliders, ortho: oOuter, scene }) : null;
   progress(0.95, 'Últimos detalles…');
   // superficies que se mojan con la lluvia y se cubren de nieve
   const surfaces = [ground.material];
   roads.traverse(o => { if (o.isMesh && o.material?.map && !surfaces.includes(o.material)) surfaces.push(o.material); });
   buildings.traverse(o => { if (o.isMesh && (o.material?.map === tex.roof || o.material?.map === tex.flatRoof) && !surfaces.includes(o.material)) surfaces.push(o.material); });
-  return { data, terrain, colliders, trees, oFull, lamps: roads.userData.lamps, bellTower, tex, surfaces, sites };
+  return { data, terrain, colliders, trees, oFull, lamps: roads.userData.lamps, bellTower, tex, surfaces, sites, outer, oOuter };
 }
 
 const input = new Input(canvas);
@@ -119,7 +126,7 @@ function waitForMap() {
 }
 const hud = { mode: document.getElementById('mode'), speed: document.getElementById('speed'), hint: document.getElementById('hint'), place: document.getElementById('place') };
 
-waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull, lamps, bellTower, tex, surfaces, sites }) => {
+waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull, lamps, bellTower, tex, surfaces, sites, outer, oOuter }) => {
   const world = { terrain, colliders, scene, personScale: data.personScale || 1 };
   const player = new Player(world); scene.add(player.mesh);
   player.pos.set(data.spawn[0], terrain.height(data.spawn[0], data.spawn[1]), data.spawn[1]);
@@ -160,6 +167,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   const ui = { mission: document.getElementById('mission'), money: document.getElementById('money'), toast: document.getElementById('toast') };
   const streets = data.roads.filter(r => r.k !== 'track' && r.k !== 'path').map(r => r.p);
   const minimap = new Minimap(document.getElementById('minimap'), oFull.image, data.ortho.full.bounds, streets);
+  if (outer) minimap.outer = { img: oOuter.image, b: outer.data.ortho.bounds };
   const engine = new EngineSound();
   const missions = new Missions({ scene, terrain, start, drops: deliveryPoints(data), ui, sound: k => engine.blip(k) });
   let bellTimer = 0, bellRing = null;
@@ -180,7 +188,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     if (saved.records) race.records = saved.records;
     for (const v of saved.owned || []) { const c = spawnVehicle(v.kind, v.color, v.x, v.z, v.h); c.owned = true; c.fuel = v.fuel ?? 1; if (v.health < 100) c.damage(100 - v.health, 0, 1.8); }
   }
-  const weather = new Weather({ scene, isMobile }); for (const m of surfaces) weatherize(m, weather.U);
+  const weather = new Weather({ scene, isMobile }); for (const m of surfaces) weatherize(m, weather.U); outer?.setWeather(weather.U);
   if (saved?.weather) weather.set(saved.weather);
   const shops = new Shops({ scene, world, data, center, colliders, spawnVehicle, wallet: missions, toast, sound, sites, owned: (saved?.owned || []).map(v => v.kind) });
   const jobs = new Jobs({ scene, world, data, center, drops: deliveryPoints(data), ui, toast, sound, wallet: missions, personScale: world.personScale });
@@ -214,7 +222,8 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   camera.position.copy(player.pos).add(new THREE.Vector3(0, 3, -6));
 
   loading.classList.add('done');
-  document.getElementById('place').textContent = data.title;
+  const placeEl = document.getElementById('place'); placeEl.textContent = data.title;
+  if (outer && Math.max(Math.abs(player.pos.x), Math.abs(player.pos.z)) > 1500) outer.prime(player.pos, dayNight.far);
   if (data.style === 'urban') { scene.fog.color.set(0xc4ccd4); su.turbidity.value = 7; sun.intensity = 2.2; }
   document.getElementById('help').classList.add('show');
   setTimeout(() => document.getElementById('help').classList.remove('show'), 9000);
@@ -280,6 +289,17 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     const fc = window.__game?.freeCam; if (fc) { camera.position.set(...fc.pos); camera.lookAt(...fc.look); }
 
     trees.update(target);
+    if (outer) {
+      outer.update(target, dayNight.far);
+      // borde del mundo: 10 km desde el pueblo
+      const lim = outer.data.half - 60, mover = driving || player, p = mover.pos;
+      if (Math.abs(p.x) > lim || Math.abs(p.z) > lim) {
+        p.x = THREE.MathUtils.clamp(p.x, -lim, lim); p.z = THREE.MathUtils.clamp(p.z, -lim, lim);
+        if (driving) driving.speed *= -0.3;
+        if ((frameNo & 63) === 0) toast('Fin del mapa', 'Hasta aquí llegan los 10 km alrededor de Val de Santa María');
+      }
+      if ((frameNo & 31) === 0) { const nm = outer.placeName(target.x, target.z) || data.title; if (placeEl.textContent !== nm) placeEl.textContent = nm; }
+    }
     dayNight.update(dt, target);
     weather.inside = !!interiors.inside;
     weather.update(dt, interiors.inside ? new THREE.Vector3(0, -999, 0) : camera.position, dayNight, sun, hemi, sky);

@@ -15,8 +15,15 @@ export class Minimap {
     g.translate(r, r); g.rotate(camYaw); // "arriba" del mapa = hacia donde mira la cámara
     g.globalAlpha = 0.9;
     // la imagen va de norte (fila 0, z=-HALF) a sur
-    const sx = (px - x0) / mpp, sz = (pz - x0) / mpp, src = this.radius * 1.5 / mpp;
-    g.drawImage(this.img, sx - src, sz - src, src * 2, src * 2, -this.radius * 1.5 * k, -this.radius * 1.5 * k, this.radius * 3 * k, this.radius * 3 * k);
+    const R = this.radius * 1.5;
+    const layer = (img, X0, X1) => { // recorte de la imagen alrededor del jugador (fuera de la imagen no se dibuja nada)
+      const m = (X1 - X0) / img.width, sx = (px - X0) / m, sz = (pz - X0) / m, src = R / m;
+      const a0 = Math.max(0, sx - src), b0 = Math.max(0, sz - src), a1 = Math.min(img.width, sx + src), b1 = Math.min(img.height, sz + src);
+      if (a1 <= a0 || b1 <= b0) return;
+      g.drawImage(img, a0, b0, a1 - a0, b1 - b0, (a0 * m + X0 - px) * k, (b0 * m + X0 - pz) * k, (a1 - a0) * m * k, (b1 - b0) * m * k);
+    };
+    if (this.outer && (Math.abs(px) > x1 - R || Math.abs(pz) > x1 - R)) layer(this.outer.img, this.outer.b[0], this.outer.b[2]);
+    layer(this.img, x0, x1); void mpp;
     g.globalAlpha = 1;
     // calles con nombre
     g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 2.2; g.lineCap = 'round';
