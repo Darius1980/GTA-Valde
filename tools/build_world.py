@@ -28,6 +28,11 @@ def blur(a, s):
     a = np.apply_along_axis(lambda v: np.convolve(v, k, "valid"), 0, a)
     return np.apply_along_axis(lambda v: np.convolve(v, k, "valid"), 1, a)
 dem = blur(dem, 1.3)
+# mapas grandes: rejilla más gruesa (como mucho ~450 x 450 celdas) para que el terreno vaya fluido en el móvil
+if dem.shape[0] > 460:
+    from PIL import Image as _Im
+    m = 450
+    dem = np.asarray(_Im.fromarray(dem.astype(np.float32), mode="F").resize((m, m), _Im.BILINEAR)).astype(np.float32)
 n = dem.shape[0]; cell = 2 * HALF / n
 y0 = float(np.round(dem[n // 2, n // 2]))
 heights = (dem - y0).astype(np.float32)          # alturas relativas al centro del pueblo
@@ -232,8 +237,8 @@ rng.shuffle(cand)
 for j, i in cand:
     x = (i + 0.5) * mpp - HALF + rng.uniform(-0.4, 0.4); z = (j + 0.5) * mpp - HALF + rng.uniform(-0.4, 0.4)
     d = math.hypot(x, z)
-    if d > 900: continue
-    sp = spacing if d < 450 else spacing * 1.6
+    if d > HALF - 100: continue
+    sp = spacing if d < 450 else spacing * (1.6 if d < 1000 else 2.6)
     gi, gj = int(x // sp), int(z // sp)
     if any((gi + a, gj + b) in occ for a in (-1, 0, 1) for b in (-1, 0, 1)
            if math.dist(occ.get((gi + a, gj + b), (1e9, 1e9)), (x, z)) < sp): continue
@@ -285,6 +290,6 @@ if not clear(spawn, 1):
         if clear(cand, 1): spawn = cand; break
 
 world = {"name": NAME, "title": CFG["title"], "style": CFG.get("style", "rural"), "carScale": CFG.get("car_scale", 1), "personScale": CFG.get("person_scale", 1), "terrain": terrain, "ortho": ortho, "buildings": buildings, "roads": roads, "walls": walls,
-         "trees": trees, "cars": cars, "spawn": spawn, "church": CFG.get("church"), "plaza": CFG.get("plaza"), "race_start": CFG.get("race_start")}
+         "trees": trees, "cars": cars, "spawn": spawn, "church": CFG.get("church"), "plaza": CFG.get("plaza"), "race_start": CFG.get("race_start"), "half": HALF}
 json.dump(world, open(os.path.join(OUT, "world.json"), "w"), separators=(",", ":"))
 print("world.json", os.path.getsize(os.path.join(OUT, "world.json")) // 1024, "KB")

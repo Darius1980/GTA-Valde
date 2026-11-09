@@ -79,7 +79,7 @@ body.touch.driving #btns { bottom: max(24px, env(safe-area-inset-bottom)); right
 #toast b { font-size: clamp(18px, 3.2vw, 26px); }
 #toast span { font-size: 13px; }
 #help { top: auto; bottom: 186px; max-width: min(46vw, 420px); font-size: 12px; }
-body.touch #mission { top: calc(max(12px, env(safe-area-inset-top)) + 26px); bottom: auto; font-size: 12px; }
+body.touch #mission { top: calc(max(12px, env(safe-area-inset-top)) + 26px); bottom: auto; font-size: 12px; max-width: 40vw; }
 body.touch #toast { top: calc(max(12px, env(safe-area-inset-top)) + 62px); }
 body.touch #help { bottom: auto; top: calc(max(12px, env(safe-area-inset-top)) + 110px); max-width: 52vw; }
 #fs { left: auto; right: 16px; transform: none; bottom: auto; top: 50%; }
@@ -89,3 +89,12 @@ body.touch #fs { top: auto; right: auto; left: 50%; transform: translateX(-50%);
 .btn.gear { font: 900 22px Impact, sans-serif; color: #f5c542; height: 46px; }
 /* la marcha va encima del botón de la puerta, para no tapar el minimapa */
 #pedals .gear { position: absolute; right: 83px; bottom: 80px; width: 62px; }
+.toprow { display: flex; gap: 6px; justify-content: flex-end; align-items: center; }
+#wx { font: 700 15px/1.2 system-ui; pointer-events: auto; cursor: pointer; background: rgba(0,0,0,.35); padding: 3px 8px; border-radius: 12px; margin-bottom: 4px; }
+#wanted { font: 900 24px/1 system-ui; color: #f5c542; letter-spacing: 2px; min-height: 0; }
+#wanted.busted { color: #ff5a4a; animation: blink .4s infinite alternate; }
+@keyframes blink { to { opacity: .35; } }
+#fuel { display: inline-block; width: 70px; height: 7px; background: rgba(255,255,255,.2); border-radius: 4px; overflow: hidden; vertical-align: middle; margin-left: 6px; }
+#fuel i { display: block; height: 100%; background: #f5a623; }
+#fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity .35s; z-index: 5; }
+#fade.on { opacity: 1; }

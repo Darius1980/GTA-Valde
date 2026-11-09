@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { makeCar } from './models.js';
+import { makeVehicle } from './models.js';
 
 // punto (x, z) del mundo en coordenadas locales del coche, sin escala
 function localHit(car, x, z) {
@@ -14,15 +14,42 @@ function smokeTex() {
   g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return (_smoke = new THREE.CanvasTexture(c));
 }
 
-const WB = 2.65; // batalla
+// características de cada vehículo: tirón y velocidad punta (m/s) de cada marcha, círculos de choque,
+// radio, batalla, cuánto le frena la cuesta y autonomía (m con el depósito lleno)
+export const SPEC = {
+  sedan:   { g1: [5.5, 13.5], g2: [3.6, 29], circ: [-1.4, 0, 1.4], r: 0.95, wb: 2.65, slope: 1, range: 14000, name: 'Turismo' },
+  suv:     { g1: [5.2, 13.5], g2: [3.4, 28], circ: [-1.4, 0, 1.4], r: 0.95, wb: 2.65, slope: 0.7, range: 12000, name: 'Todoterreno' },
+  police:  { g1: [6.0, 14.5], g2: [4.2, 32], circ: [-1.4, 0, 1.4], r: 0.95, wb: 2.65, slope: 0.7, range: 1e9, name: 'Guardia Civil' },
+  '4x4':   { g1: [6.0, 14], g2: [3.8, 30], circ: [-1.4, 0, 1.4], r: 1.0, wb: 2.65, slope: 0.3, range: 11000, name: '4x4' },
+  tractor: { g1: [3.4, 6.5], g2: [2.4, 11.5], circ: [-1.1, 0, 1.1], r: 1.05, wb: 2.1, slope: 0.15, range: 20000, name: 'Tractor' },
+  moto:    { g1: [7.5, 16], g2: [4.8, 33], circ: [-0.55, 0.55], r: 0.45, wb: 1.4, slope: 0.8, range: 16000, name: 'Moto' },
+};
 export class Car {
   constructor(world, color, kind, scale = 1) {
-    this.world = world; this.mesh = makeCar(color, kind); this.s = scale; this.mesh.scale.setScalar(scale);
+    this.kind = SPEC[kind] ? kind : 'sedan'; this.color = color; this.spec = SPEC[this.kind];
+    this.world = world; this.mesh = makeVehicle(this.kind, color); this.s = scale; this.mesh.scale.setScalar(scale);
+    this.fuel = 1; this.wipe = 0;
     this.pos = new THREE.Vector3(); this.heading = 0; this.speed = 0; this.steer = 0; this.driver = false;
     this.settled = false; this.quat = new THREE.Quaternion();
     this.health = 100; this.smoke = []; this.gear = 1;
   }
   get wrecked() { return this.health <= 0; }
+  get R() { return this.spec.r * this.s; }
+  // taller: carrocería nueva (sin abolladuras) y motor como nuevo
+  repair() {
+    const old = this.mesh, m = makeVehicle(this.kind, this.color); m.scale.setScalar(this.s);
+    m.position.copy(old.position); m.quaternion.copy(old.quaternion);
+    const parent = old.parent; for (const c of [...old.children]) if (c.isLight || c.userData.keep) m.add(c);
+    if (parent) { parent.remove(old); parent.add(m); }
+    this.mesh = m; this.health = 100; for (const sp of this.smoke) sp.material.opacity = 0;
+  }
+  // limpiaparabrisas (lluvia/nieve: 0..1)
+  wipers(dt, on) {
+    const w = this.mesh.userData.wipers; if (!w?.length) return;
+    if (on) this.wipe += dt * 2.6; else if (this.wipe % (Math.PI * 2) > 0.05) this.wipe += dt * 2.6; else this.wipe = 0;
+    const a = (1 - Math.cos(this.wipe)) / 2 * 1.45;
+    for (const arm of w) arm.rotation.y = a;
+  }
   // golpe: abolla la carrocería cerca del punto de impacto (coordenadas locales sin escalar) y resta vida
   damage(amount, lx, lz) {
     // un mismo golpe toca varios puntos de contacto durante unos fotogramas: solo cuenta una vez
@@ -71,11 +98,11 @@ export class Car {
   place(x, z, h) { this.pos.set(x, this.world.terrain.height(x, z), z); this.heading = h; this.#orient(1); }
   circles() {
     const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
-    return [-1.4, 0, 1.4].map(o => [this.pos.x + fx * o * this.s, this.pos.z + fz * o * this.s]);
+    return this.spec.circ.map(o => [this.pos.x + fx * o * this.s, this.pos.z + fz * o * this.s]);
   }
   pushOut(p, r) {
     for (const [cx, cz] of this.circles()) {
-      const dx = p.x - cx, dz = p.z - cz, d = Math.hypot(dx, dz), R = 0.95 * this.s + r;
+      const dx = p.x - cx, dz = p.z - cz, d = Math.hypot(dx, dz), R = this.R + r;
       if (d < R && d > 1e-6) { p.x = cx + dx / d * R; p.z = cz + dz / d * R; }
     }
   }
@@ -93,26 +120,29 @@ export class Car {
     }
     if (input) {
       // el motor pierde fuerza poco a poco con los daños; solo deja de tirar del todo al 100 %
-      const a0 = input.axes(), power = this.wrecked ? 0 : 0.45 + 0.55 * this.health / 100, a = { x: a0.x, y: a0.y > 0 ? a0.y * power : a0.y * (this.wrecked ? 0 : 1) };
-      const maxSteer = 0.6 / (1 + Math.abs(this.speed) / 12);
-      this.steer += (a.x * maxSteer - this.steer) * Math.min(1, dt * 6);
+      const dry = this.fuel <= 0, dead = this.wrecked || dry;
+      const a0 = input.axes(), power = dead ? 0 : 0.45 + 0.55 * this.health / 100, a = { x: a0.x, y: a0.y > 0 ? a0.y * power : a0.y * (dead ? 0 : 1) };
+      const grip = this.world.grip ?? 1; // lluvia y nieve: frena peor y gira menos
+      const maxSteer = 0.6 / (1 + Math.abs(this.speed) / 12) * (0.6 + 0.4 * grip);
+      this.steer += (a.x * maxSteer - this.steer) * Math.min(1, dt * 6 * (0.5 + 0.5 * grip));
       const throttle = a.y;
-      if (input.brake) this.speed -= Math.sign(this.speed) * Math.min(Math.abs(this.speed), 14 * dt);
-      else if (throttle > 0) { // dos marchas: corta (más tirón, hasta ~45 km/h) y larga (hasta ~90 km/h)
-        const v = Math.max(0, this.speed), F = this.gear === 2 ? 3.6 * (1 - (v / 29) ** 2) : 5.5 * (1 - (v / 13.5) ** 2);
-        this.speed += (this.speed < 0 ? 8 : Math.max(-1.5, F)) * throttle * dt;
+      if (input.brake) this.speed -= Math.sign(this.speed) * Math.min(Math.abs(this.speed), 14 * grip * dt);
+      else if (throttle > 0) { // dos marchas: corta (más tirón) y larga (más punta); cada vehículo tiene las suyas
+        const [F0, V] = this.gear === 2 ? this.spec.g2 : this.spec.g1, v = Math.max(0, this.speed), F = F0 * (1 - (v / V) ** 2);
+        this.speed += (this.speed < 0 ? 8 * grip : Math.max(-1.5, F * (0.7 + 0.3 * grip))) * throttle * dt;
       }
-      else if (throttle < 0) this.speed += (this.speed > 0 ? 9 : 2.5 * (1 + this.speed / 8)) * throttle * dt;
+      else if (throttle < 0) this.speed += (this.speed > 0 ? 9 * grip : 2.5 * (1 + this.speed / 8)) * throttle * dt;
+      if (this.driver && !dead) this.fuel = Math.max(0, this.fuel - Math.abs(this.speed) * dt / this.spec.range - (throttle ? 0.000004 : 0));
     } else this.steer *= 0.9;
     // rozamiento y resistencia
     this.speed -= (0.0007 * this.speed * Math.abs(this.speed) + 0.01 * this.speed) * dt + Math.sign(this.speed) * Math.min(Math.abs(this.speed), (input && input.axes().y ? 0.2 : 1.6) * dt);
     // pendiente
     const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
     const slope = terrain.height(this.pos.x + fx, this.pos.z + fz) - terrain.height(this.pos.x - fx, this.pos.z - fz);
-    this.speed -= slope / 2 * 9.8 * dt * 0.6;
+    this.speed -= slope / 2 * 9.8 * dt * 0.6 * this.spec.slope;
     if (Math.abs(this.speed) < 0.02 && !(input && input.axes().y)) this.speed = 0;
 
-    this.heading -= this.speed * Math.tan(this.steer) / (WB * this.s) * dt;
+    this.heading -= this.speed * Math.tan(this.steer) / (this.spec.wb * this.s) * dt;
     this.pos.x += Math.sin(this.heading) * this.speed * dt; this.pos.z += Math.cos(this.heading) * this.speed * dt;
 
     if (this.speed !== 0 || !this.settled) {
@@ -121,11 +151,11 @@ export class Car {
       const f2x = Math.sin(this.heading), f2z = Math.cos(this.heading), v0 = Math.abs(this.speed);
       for (const o0 of [-1.4, 0, 1.4]) {
         const o = o0 * this.s, p = { x: this.pos.x + f2x * o, z: this.pos.z + f2z * o };
-        const hit = colliders.resolve(p, 0.95 * this.s);
+        const hit = colliders.resolve(p, this.R);
         if (hit) {
           this.pos.x = p.x - f2x * o; this.pos.z = p.z - f2z * o;
           wallN = wallN || hit; // la normal apunta desde la pared hacia el coche
-          hitAt = hitAt || localHit(this, p.x - hit.x * 0.95 * this.s, p.z - hit.z * 0.95 * this.s);
+          hitAt = hitAt || localHit(this, p.x - hit.x * this.R, p.z - hit.z * this.R);
         }
       }
       if (hitAt && v0 > 3 && this.driver) this.damage((v0 - 3) * 1.6, hitAt[0], hitAt[1]);
@@ -133,7 +163,7 @@ export class Car {
         // par de círculos con más solape entre los dos coches
         let best = null;
         for (const [cx, cz] of this.circles()) for (const [ox, oz] of c.circles()) {
-          const dx = cx - ox, dz = cz - oz, d = Math.hypot(dx, dz), D = 0.95 * (this.s + c.s);
+          const dx = cx - ox, dz = cz - oz, d = Math.hypot(dx, dz), D = this.R + c.R;
           if (d < D && d > 1e-6 && (!best || D - d > best.pen)) best = { dx, dz, d, pen: D - d, cx, cz, ox, oz };
         }
         if (!best) continue;
@@ -205,6 +235,10 @@ export class Car {
     this.mesh.position.copy(this.pos);
     this.mesh.quaternion.slerp(this.quat, Math.min(1, dt * 10));
     // balanceo de la carrocería al girar
-    this.mesh.userData.body.rotation.z = THREE.MathUtils.clamp(-this.steer * this.speed * 0.006, -0.06, 0.06);
+    if (this.kind === 'moto') { // la moto se inclina en las curvas
+      const lean = THREE.MathUtils.clamp(this.steer * Math.abs(this.speed) * 0.07, -0.6, 0.6);
+      this.lean = (this.lean || 0) + (lean - (this.lean || 0)) * Math.min(1, dt * 5);
+      this.mesh.userData.body.rotation.z = this.lean; for (const w of this.mesh.userData.wheels) w.pivot.rotation.z = this.lean;
+    } else this.mesh.userData.body.rotation.z = THREE.MathUtils.clamp(-this.steer * this.speed * 0.006, -0.06, 0.06);
   }
 }

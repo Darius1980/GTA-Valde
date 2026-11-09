@@ -11,6 +11,14 @@ import { DayNight } from './daynight.js';
 import { RoadNet, Driver, Walker } from './traffic.js';
 import { Missions, deliveryPoints } from './missions.js';
 import { Race } from './race.js';
+import { Police } from './police.js';
+import { Weather, weatherize } from './weather.js';
+import { Ambient } from './sound.js';
+import { loadSave, writeSave } from './save.js';
+import { Shops, findShopSites } from './shops.js';
+import { Jobs } from './jobs.js';
+import { Plaza } from './fiesta.js';
+import { Interiors } from './interiors.js';
 
 const isMobile = matchMedia('(pointer: coarse)').matches;
 const canvas = document.getElementById('game');
@@ -55,16 +63,24 @@ async function load(map) {
   const meta = { ...data.terrain, ortho: { full: data.ortho.full.bounds, center: data.ortho.center.bounds } };
   smoothRoads(data.roads); // curvas redondeadas
   const center = data.plaza?.start || data.spawn;
-  scene.add(buildTerrain(meta, terrain, oFull, oCenter, tex, data.style === 'urban' ? null : villageMask(data, center)));
+  const ground = buildTerrain(meta, terrain, oFull, oCenter, tex, data.style === 'urban' ? null : villageMask(data, center)); scene.add(ground);
   const colliders = new Colliders();
   const buildings = buildBuildings(data, terrain, tex, colliders); scene.add(buildings);
   scene.add(buildPlaza(data, terrain, colliders));
   let bellTower = null; buildings.traverse(o => { if (o.userData.bellTower) bellTower = o.userData.bellTower; });
   const roads = buildRoads(data, terrain, tex, colliders); scene.add(roads);
   scene.add(buildWalls(data, terrain, tex, colliders));
+  // la gasolinera y el concesionario necesitan el terreno libre de árboles
+  const sites = findShopSites(data, data.plaza?.start || data.spawn, colliders);
+  const clearR = [[sites.gas, 13], [sites.shop, 15]].filter(([s]) => s);
+  data.trees = data.trees.filter(([x, z]) => !clearR.some(([s, r]) => Math.hypot(x - s.x, z - s.z) < r));
   const trees = new Trees(data, terrain, tex, colliders); scene.add(trees.group);
   progress(0.95, 'Últimos detalles…');
-  return { data, terrain, colliders, trees, oFull, lamps: roads.userData.lamps, bellTower };
+  // superficies que se mojan con la lluvia y se cubren de nieve
+  const surfaces = [ground.material];
+  roads.traverse(o => { if (o.isMesh && o.material?.map && !surfaces.includes(o.material)) surfaces.push(o.material); });
+  buildings.traverse(o => { if (o.isMesh && (o.material?.map === tex.roof || o.material?.map === tex.flatRoof) && !surfaces.includes(o.material)) surfaces.push(o.material); });
+  return { data, terrain, colliders, trees, oFull, lamps: roads.userData.lamps, bellTower, tex, surfaces, sites };
 }
 
 const input = new Input(canvas);
@@ -102,7 +118,7 @@ function waitForMap() {
 }
 const hud = { mode: document.getElementById('mode'), speed: document.getElementById('speed'), hint: document.getElementById('hint'), place: document.getElementById('place') };
 
-waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull, lamps, bellTower }) => {
+waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull, lamps, bellTower, tex, surfaces, sites }) => {
   const world = { terrain, colliders, scene, personScale: data.personScale || 1 };
   const player = new Player(world); scene.add(player.mesh);
   player.pos.set(data.spawn[0], terrain.height(data.spawn[0], data.spawn[1]), data.spawn[1]);
@@ -111,6 +127,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   world.cars = cars;
   let driving = null;
 
+  RoadNet.limit = (data.half || 1000) - 100;
   // tráfico: unos pocos coches por el pueblo y otros de paso por la N-631
   const net = new RoadNet(data.roads, new Set(['residential', 'tertiary', 'unclassified', 'living_street', 'trunk']));
   const villageNet = new RoadNet(data.roads, new Set(['residential', 'tertiary', 'living_street']));
@@ -121,11 +138,17 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     const c = new Car(world, aiColors[i % aiColors.length], i % 3 === 2 ? 'suv' : 'sedan', data.carScale || 1);
     c.aiKind = i % 2 ? 'trunk' : 'village'; aiSpawn(c); scene.add(c.mesh); cars.push(c);
   }
+  { // un tractor despacio por la nacional
+    const c = new Car(world, 0xb8321e, 'tractor', data.carScale || 1); c.aiKind = 'trunk';
+    c.ai = new Driver(net, c, net.randomSpot(isTrunk), 7.5); scene.add(c.mesh); cars.push(c);
+    const sp = c.ai; c.aiRespawn = () => { c.ai = new Driver(net, c, net.randomSpot(isTrunk), 7.5); }; void sp;
+  }
   // vecinos paseando
   const walkers = [];
   for (let i = 0; i < (isMobile ? 6 : 10); i++) { const w = new Walker(villageNet, world, villageNet.randomSpot(), i); scene.add(w.mesh); walkers.push(w); }
   // gatos y perros por las calles; ciervos al atardecer en la carretera de entrada
-  const animals = new Animals({ scene, world, net: villageNet, roads: data.roads, center: data.plaza?.start || data.spawn });
+  const center = data.plaza?.start || data.spawn;
+  const animals = new Animals({ scene, world, net: villageNet, roads: data.roads, center, buildings: data.buildings, half: data.half || 1000, isMobile });
   // ciclo de día y noche
   const dayNight = new DayNight({ scene, sky, sun, hemi, renderer, isMobile });
   dayNight.setLamps(lamps);
@@ -146,9 +169,42 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   });
   race.onRemove = (c) => { scene.remove(c.mesh); for (const sp of c.smoke) scene.remove(sp); const i = cars.indexOf(c); if (i >= 0 && c !== driving) cars.splice(i, 1); };
   race.onPrize = (p) => { missions.money += p; };
+  const toast = (a, b) => missions.toast(a, b), sound = k => engine.blip(k);
+  // vehículos: los que compras se guardan con la partida
+  const spawnVehicle = (kind, color, x, z, h) => { const c = new Car(world, color, kind, data.carScale || 1); c.place(x, z, h); scene.add(c.mesh); cars.push(c); return c; };
+  const saved = loadSave();
+  if (saved) {
+    missions.money = saved.money | 0; if (saved.best) missions.best = saved.best;
+    if (saved.hour >= 0) dayNight.hour = saved.hour; if (saved.day >= 0) dayNight.day = saved.day;
+    if (saved.records) race.records = saved.records;
+    for (const v of saved.owned || []) { const c = spawnVehicle(v.kind, v.color, v.x, v.z, v.h); c.owned = true; c.fuel = v.fuel ?? 1; if (v.health < 100) c.damage(100 - v.health, 0, 1.8); }
+  }
+  const weather = new Weather({ scene, isMobile }); for (const m of surfaces) weatherize(m, weather.U);
+  if (saved?.weather) weather.set(saved.weather);
+  const shops = new Shops({ scene, world, data, center, colliders, spawnVehicle, wallet: missions, toast, sound, sites, owned: (saved?.owned || []).map(v => v.kind) });
+  const jobs = new Jobs({ scene, world, data, center, drops: deliveryPoints(data), ui, toast, sound, wallet: missions, personScale: world.personScale });
+  jobs.extraDest = [shops.gasAt, jobs.farm].filter(Boolean);
+  const police = new Police({ scene, world, net, cars, scale: data.carScale || 1, isMobile, ui: { wanted: document.getElementById('wanted') }, toast, sound, wallet: missions });
+  world.onHit = (w, c) => { if (c === driving) police.report('atropello'); };
+  const ambient = new Ambient(engine);
+  const plaza = new Plaza({ scene, world, data, center, isMobile, ambient });
+  const interiors = new Interiors({ scene, world, data, center, tex, bellTower });
+  const fade = document.getElementById('fade'), wxEl = document.getElementById('wx'), minimapEl = document.getElementById('minimap');
+  wxEl.addEventListener('click', () => weather.next()); wxEl.addEventListener('touchstart', e => { weather.next(); e.stopPropagation(); }, { passive: true });
+  wxEl.textContent = weather.info.icon;
+  const save = () => writeSave({
+    money: missions.money, best: missions.best, hour: dayNight.hour, day: dayNight.day, weather: weather.kind, records: race.records,
+    owned: cars.filter(c => c.owned).map(c => ({ kind: c.kind, color: c.color, x: +c.pos.x.toFixed(1), z: +c.pos.z.toFixed(1), h: +c.heading.toFixed(2), fuel: +c.fuel.toFixed(3), health: Math.round(c.health) })),
+  });
+  race.onRecord = save; shops.onBuy = save;
+  shops.onRepair = (c) => { if (c === driving) { c.mesh.add(headlight); } };
+  addEventListener('pagehide', save); document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+  let saveT = 10, lastHour = Math.floor(dayNight.hour), toll = null;
   race.onStart = (c) => { camState.yaw = c.heading + Math.PI; camState.pitch = 0.18; camera.position.set(c.pos.x - Math.sin(c.heading) * 7, c.pos.y + 3, c.pos.z - Math.cos(c.heading) * 7); };
-  missions.busy = () => race.active; race.busy = () => missions.state === 'deliver';
-  clockEl.textContent = '☀️ ' + dayNight.clock;
+  missions.busy = () => race.active || jobs.active || !!interiors.inside;
+  race.busy = () => missions.state === 'deliver' || jobs.active || !!interiors.inside;
+  jobs.busy = () => race.active || missions.state === 'deliver' || !!interiors.inside;
+  clockEl.textContent = dayNight.clock;
   clockEl.addEventListener('click', () => dayNight.skip(1)); clockEl.addEventListener('touchstart', e => { dayNight.skip(1); e.stopPropagation(); }, { passive: true });
   for (const ev of ['keydown', 'touchstart', 'mousedown']) addEventListener(ev, () => engine.start(), { once: true });
   const camState = { yaw: player.heading + Math.PI, pitch: 0.25, dist: 4.6, pos: new THREE.Vector3() };
@@ -169,18 +225,29 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
 
     // subir/bajar del coche
     if (input.wasPressed('KeyE', 'KeyF', 'Enter', 'btn:action')) {
-      if (driving) { driving.driver = false; player.exitCar(driving); driving = null; scene.add(headlight); }
-      else {
+      if (driving) {
+        if (driving.mesh.userData.rider) driving.mesh.userData.rider.visible = false;
+        driving.driver = false; player.exitCar(driving); driving = null; scene.add(headlight);
+      }
+      else if (interiors.inside?.kind === 'bar' && interiors.hint) {
+        const drinks = [['un café con leche', 1], ['un vino de la tierra', 2], ['una caña', 2], ['un pincho de tortilla', 3]], [what, cost] = drinks[Math.random() * drinks.length | 0];
+        if (missions.money >= cost) { missions.money -= cost; toast('🍷 Bar La Plaza', `Te tomas ${what}: -${cost} €`); sound('ok'); } else toast('🍷 Bar La Plaza', 'No te llega ni para un café');
+      }
+      else if (!shops.tryBuy(player)) {
         let best = null, bd = 4.5;
-        for (const c of cars) { if (c.racer) continue; const d = c.pos.distanceTo(player.pos) - 2.2 * (1 - c.s); if (d < bd) { bd = d; best = c; } }
-        if (best) { driving = best; best.driver = true; best.ai = null; best.mesh.add(headlight); player.enterCar(best); camState.yaw = best.heading + Math.PI; camState.pitch = 0.18; }
+        for (const c of cars) { if (c.racer || c.police || c.forSale) continue; const d = c.pos.distanceTo(player.pos) - 2.2 * (1 - c.s); if (d < bd) { bd = d; best = c; } }
+        if (best) {
+          driving = best; best.driver = true; best.ai = null; best.mesh.add(headlight); player.enterCar(best); camState.yaw = best.heading + Math.PI; camState.pitch = 0.18;
+          if (best.mesh.userData.rider) best.mesh.userData.rider.visible = true;
+        }
       }
     }
+    if (input.wasPressed('KeyY')) weather.next();
     if (input.wasPressed('KeyT')) dayNight.skip(1);
     if (driving && input.wasPressed('KeyQ', 'btn:gear')) driving.gear = driving.gear === 1 ? 2 : 1;
     world.obstacles = driving ? [...cars, ...walkers] : [...cars, ...walkers, player];
     if (driving) driving.update(dt, input, camState.yaw); else player.update(dt, input, camState.yaw);
-    for (const c of cars) if (c !== driving) {
+    for (const c of cars) if (c !== driving && !c.police) {
       c.update(dt, null);
       // los coches que llegan a un callejón sin salida o al borde del mapa reaparecen lejos del jugador
       if (c.ai?.f?.deadEnd && c.pos.distanceTo(player.inCar ? driving.pos : player.pos) > 90) aiSpawn(c);
@@ -190,7 +257,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
 
     // cámara en tercera persona con seguimiento suave
     const target = driving ? driving.pos : player.pos;
-    const dist = driving ? 3 + 5.5 * driving.s : camState.dist, height = driving ? 0.6 + driving.s : 1.55 * world.personScale;
+    const dist = driving ? 3 + 5.5 * driving.s : interiors.inside ? 2.6 : camState.dist, height = driving ? 0.6 + driving.s : 1.55 * world.personScale;
     if (driving && Math.abs(look.dx) < 0.5) { // la cámara vuelve detrás del coche
       let d = (driving.heading + Math.PI) - camState.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
       camState.yaw += d * Math.min(1, dt * 2.5 * Math.min(1, Math.abs(driving.speed) / 3));
@@ -206,12 +273,42 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
 
     trees.update(target);
     dayNight.update(dt, target);
+    weather.inside = !!interiors.inside;
+    weather.update(dt, interiors.inside ? new THREE.Vector3(0, -999, 0) : camera.position, dayNight, sun, hemi, sky);
+    world.grip = weather.grip;
+    for (const c of cars) if (c === driving || (c.ai && c.pos.distanceToSquared(target) < 3600)) c.wipers(dt, weather.raining);
     animals.update(dt, target, cars, dayNight);
     const nf = dayNight.n;
     for (const c of cars) c.setLights(c.ai || c === driving ? nf : 0, c === driving ? input.brake || (input.axes().y < 0 && driving.speed > 0.5) : c.ai && c.speed < 1);
     headlight.intensity = driving ? 60 * nf : 0;
     missions.update(dt, target);
     race.update(dt, driving, target);
+    jobs.update(dt, target, driving); jobs.tick(dt);
+    police.update(dt, target, driving, center, !!interiors.inside);
+    const shopHint = shops.update(dt, driving, player);
+    plaza.update(dt, dayNight, target, toast);
+    // puertas del bar y de la iglesia
+    const door = interiors.update(dt, player, driving, input);
+    if (door) {
+      fade.classList.add('on');
+      setTimeout(() => {
+        if (door.enter) { const r = door.enter; player.pos.set(r.spawn[0], 0, r.spawn[1] - 2); player.heading = Math.PI; toast(`${r.icon} ${r.name}`, 'Sal por la puerta del fondo (círculo blanco)'); }
+        else { const r = door.exit, [x, z, a] = r.door; player.pos.set(x + Math.sin(a) * 1.6, 0, z + Math.cos(a) * 1.6); player.pos.y = terrain.height(player.pos.x, player.pos.z); player.heading = a; }
+        camState.yaw = player.heading + Math.PI; camera.position.set(player.pos.x - Math.sin(player.heading) * 3, player.pos.y + 2, player.pos.z - Math.cos(player.heading) * 3);
+        minimapEl.style.visibility = interiors.inside ? 'hidden' : 'visible';
+        setTimeout(() => fade.classList.remove('on'), 150);
+      }, 360);
+    }
+    // campanadas a las horas en punto: tantas como la hora (de 1 a 12)
+    const hNow = Math.floor(dayNight.hour);
+    if (hNow !== lastHour) { lastHour = hNow; if (bellTower && engine.ctx) toll = { n: hNow % 12 || 12, k: 0, t: 0 }; }
+    if (toll && bellTower) {
+      toll.t -= dt;
+      if (toll.t <= 0 && toll.k < toll.n) { const d = Math.hypot(target.x - bellTower.x, target.z - bellTower.z); if (d < 1200) engine.bell(294, (interiors.inside ? 0.1 : 0.32) / (1 + d / 70)); toll.k++; toll.t = 2.1; }
+      if (toll.k >= toll.n) toll = null;
+    }
+    ambient.update(dt, { day: 1 - dayNight.n, night: dayNight.n, rain: interiors.inside ? 0 : weather.cur.rain, wind: interiors.inside ? 0 : Math.max(weather.cur.snow, weather.cur.fog * 0.5), siren: police.siren, music: plaza.musicLevel, inside: !!interiors.inside });
+    if ((saveT -= dt) <= 0) { saveT = 10; save(); }
     // campanas: repican al pasar junto a la iglesia (como mucho una vez cada minuto y medio)
     if (bellTower) {
       const bd = Math.hypot(target.x - bellTower.x, target.z - bellTower.z);
@@ -232,21 +329,27 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     sun.position.copy(target).addScaledVector(dayNight.light, 200); sun.target.position.copy(target);
 
     engine.update(!!driving, driving ? driving.speed : 0, driving ? input.axes().y : 0, driving ? driving.gear : 1);
-    if ((frameNo++ & 1) === 0) minimap.draw(target.x, target.z, driving ? driving.heading : player.heading, camState.yaw, cars, driving, { walkers, flags: race.starts, target: race.target || missions.target, targetColor: race.target ? '#3aa0e2' : missions.state === 'deliver' ? '#47d16c' : '#f5c542' });
+    if ((frameNo++ & 1) === 0) minimap.draw(target.x, target.z, driving ? driving.heading : player.heading, camState.yaw, cars, driving, { walkers, flags: [...race.starts, ...jobs.flags, ...shops.flags, ...interiors.flags], target: race.target || jobs.target || missions.target, targetColor: race.target ? '#3aa0e2' : jobs.active || missions.state === 'deliver' ? '#47d16c' : '#f5c542' });
     camera.fov += ((driving ? 60 + Math.min(15, Math.abs(driving.speed) * 0.5) : 60) - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix();
     if (driving && gearBtn.dataset.g !== String(driving.gear)) { gearBtn.dataset.g = driving.gear; gearBtn.textContent = driving.gear === 1 ? 'C' : 'L'; }
-    hud.mode.textContent = driving ? `${driving.gear === 1 ? 'Corta' : 'Larga'} · ${driving.wrecked ? 'averiado' : `daños ${Math.round(100 - driving.health)} %`}` : 'A pie';
-    if ((frameNo & 15) === 0) clockEl.textContent = (dayNight.n > 0.5 ? '🌙 ' : '☀️ ') + dayNight.clock;
+    const modeTxt = driving ? `${driving.gear === 1 ? 'Corta' : 'Larga'} · ${driving.wrecked ? 'averiado' : `daños ${Math.round(100 - driving.health)} %`} <span id="fuel"><i style="width:${Math.round(driving.fuel * 100)}%"></i></span>` : interiors.inside ? interiors.inside.name : 'A pie';
+    if (hud.mode.innerHTML !== modeTxt) hud.mode.innerHTML = modeTxt;
+    if ((frameNo & 15) === 0) { const w = weather.info.icon; if (wxEl.textContent !== w) wxEl.textContent = w; }
+    if ((frameNo & 15) === 0) clockEl.textContent = (dayNight.n > 0.5 ? '🌙 ' : '') + dayNight.clock;
     hud.speed.textContent = driving ? `${Math.round(Math.abs(driving.speed) * 3.6)} km/h` : '';
-    const near = !driving && cars.some(c => c.pos.distanceTo(player.pos) < 4.5);
-    hud.hint.textContent = race.nearOnFoot ? 'Necesitas un coche para la carrera' : race.nearName && !race.active ? `🏁 ${race.nearName}: entra en el círculo rojo con un coche` : driving?.wrecked ? 'Coche averiado: bájate y coge otro' : driving ? (input.touch ? 'Pulsa 🚪 para bajar' : 'E para bajar') : near ? (input.touch ? 'Pulsa 🚪 para subir al coche' : 'E para subir al coche') : '';
+    const near = !driving && cars.some(c => !c.police && !c.forSale && c.pos.distanceTo(player.pos) < 4.5);
+    hud.hint.textContent = police.bustT > 0.3 ? '🚓 ¡Te están deteniendo! Escapa'
+      : interiors.hint || shopHint || jobs.hint
+      || (driving && driving.fuel <= 0 ? 'Sin gasolina: bájate y busca otro vehículo' : '')
+      || (race.nearOnFoot ? 'Necesitas un coche para la carrera' : race.nearName && !race.active ? `🏁 ${race.nearName}` : '')
+      || (driving?.wrecked ? 'Coche averiado: llévalo al taller o coge otro' : driving ? (input.touch ? 'Pulsa 🚪 para bajar' : 'E para bajar') : near ? (input.touch ? 'Pulsa 🚪 para subir' : 'E para subir') : '');
     document.body.classList.toggle('driving', !!driving);
     input.driving = !!driving;
     input.endFrame();
     renderer.render(scene, camera);
     requestAnimationFrame(frame);
   }
-  window.__game = { animals, player, cars, walkers, race, camera, scene, renderer, terrain, dayNight, missions, get driving() { return driving; } };
+  window.__game = { weather, police, shops, jobs, plaza, interiors, save, animals, player, cars, walkers, race, camera, scene, renderer, terrain, dayNight, missions, get driving() { return driving; } };
   frame();
 }).catch(e => { console.error(e); document.getElementById('lmsg').textContent = 'Error cargando: ' + e.message; });
 

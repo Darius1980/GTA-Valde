@@ -30,7 +30,7 @@ export class Minimap {
     for (const f of extra.flags || []) {
       let x = (f[0] - px) * k, y = (f[1] - pz) * k; const d = Math.hypot(x, y), lim = r - 7;
       if (d > lim) { x *= lim / d; y *= lim / d; }
-      g.fillStyle = '#e2403a'; g.strokeStyle = '#000'; g.lineWidth = 1;
+      g.fillStyle = FLAG[f[2]] || '#e2403a'; g.strokeStyle = '#000'; g.lineWidth = 1;
       g.beginPath(); g.arc(x, y, 4, 0, 7); g.fill(); g.stroke();
     }
     // objetivo de la misión (en el borde si está lejos)
@@ -51,6 +51,9 @@ export class Minimap {
     g.fillStyle = '#fff'; g.font = 'bold 12px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('N', nx, ny);
   }
 }
+
+// colores de los puntos del minimapa
+const FLAG = { leche: '#f2f2f2', correo: '#f0a020', taxi: '#2ed1ff', gas: '#ff8c1a', taller: '#2ec4c4', shop: '#d84fd8', bar: '#8b5a2b', church: '#c9b48a' };
 
 export class EngineSound {
   constructor() { this.ctx = null; }

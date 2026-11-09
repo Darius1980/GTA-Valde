@@ -11,6 +11,7 @@ export class RoadNet {
       const k = this.key(p); if (!this.at.has(k)) this.at.set(k, []); this.at.get(k).push([ri, i]);
     }));
   }
+  static limit = 900; // borde del mapa jugable
   key(p) { return `${Math.round(p[0] * 2)},${Math.round(p[1] * 2)}`; }
   // al llegar al vértice i de la calle ri (yendo en sentido dir), elige por dónde seguir
   next(ri, i, dir, rnd = Math.random) {
@@ -34,7 +35,7 @@ export class RoadNet {
     for (let k = 0; k < 50; k++) { // dentro del mapa
       const [r, ri] = list[Math.floor(Math.random() * list.length)];
       const i = Math.floor(Math.random() * (r.p.length - 1)), p = r.p[i];
-      if (Math.abs(p[0]) < 900 && Math.abs(p[1]) < 900) return { ri, i, dir: Math.random() < 0.5 && i > 0 ? -1 : 1 };
+      if (Math.abs(p[0]) < RoadNet.limit && Math.abs(p[1]) < RoadNet.limit) return { ri, i, dir: Math.random() < 0.5 && i > 0 ? -1 : 1 };
     }
     return { ri: 0, i: 0, dir: 1 };
   }
@@ -159,10 +160,10 @@ export class Walker {
       const ox = this.pos.x - c.pos.x, oz = this.pos.z - c.pos.z, d = Math.hypot(ox, oz), v = Math.abs(c.speed);
       // atropello: solo si de verdad le toca la carrocería
       if (v > 2.5) for (const [cx, cz] of c.circles()) {
-        if (Math.hypot(this.pos.x - cx, this.pos.z - cz) < 0.95 * c.s + 0.25) {
+        if (Math.hypot(this.pos.x - cx, this.pos.z - cz) < c.R + 0.25) {
           const sgn = Math.sign(c.speed), fx = Math.sin(c.heading) * sgn, fz = Math.cos(c.heading) * sgn;
           this.fly = { vx: fx * v * 0.75 + ox / (d || 1) * 1.5, vz: fz * v * 0.75 + oz / (d || 1) * 1.5, vy: 1.5 + v * 0.18, rot: 0, spin: -(3 + v * 0.3), ground: 0 };
-          this.pause = 0; this.world.onHit?.(this); return;
+          this.pause = 0; this.world.onHit?.(this, c); return;
         }
       }
       // un coche se acerca hacia él: se aparta hacia un lado de su trayectoria

@@ -22,7 +22,7 @@ function buildRoute(net, start, length, seed = 7) { const rnd = () => ((seed = (
         [ri, i, dir] = opts[Math.floor(rnd() * opts.length)]; ni = i + dir;
       }
       const q = net.roads[ri].p[ni], last = pts[pts.length - 1];
-      if (Math.abs(q[0]) > 900 || Math.abs(q[1]) > 900) break;
+      if (Math.abs(q[0]) > RoadNet.limit || Math.abs(q[1]) > RoadNet.limit) break;
       L += Math.hypot(q[0] - last[0], q[1] - last[1]); pts.push(q); seen.add(net.key(q)); i = ni;
     }
     if (L >= length * 0.8) return pts;
@@ -109,7 +109,7 @@ export class Race {
     const nearest = (net, [x, z], minC = 0, maxC = Infinity) => {
       let best = null, bd = Infinity;
       for (const r of net.roads) for (const q of r.p) {
-        const dc = Math.hypot(q[0] - center[0], q[1] - center[1]); if (dc < minC || dc > maxC || Math.abs(q[0]) > 850 || Math.abs(q[1]) > 850) continue;
+        const dc = Math.hypot(q[0] - center[0], q[1] - center[1]); if (dc < minC || dc > maxC || Math.abs(q[0]) > RoadNet.limit - 50 || Math.abs(q[1]) > RoadNet.limit - 50) continue;
         const d = Math.hypot(q[0] - x, q[1] - z); if (d < bd) { bd = d; best = q; }
       }
       return best;
@@ -128,27 +128,32 @@ export class Race {
       const path = new Path(pts), m = path.at(24), marker = beam(0xe2403a);
       if (this.circuits.some(c => Math.hypot(c.marker.position.x - m.x, c.marker.position.z - m.z) < 30)) continue; // salidas demasiado juntas
       marker.position.set(m.x, world.terrain.height(m.x, m.z), m.z); scene.add(marker);
-      this.circuits.push({ ...d, path, marker });
+      // contrarreloj: círculo morado al lado de la salida, sin rivales, contra tu récord
+      const tm = path.at(24, 7.5), trial = beam(0x9b4dff); trial.scale.set(1, 0.6, 1);
+      trial.position.set(tm.x, world.terrain.height(tm.x, tm.z), tm.z); scene.add(trial);
+      this.circuits.push({ ...d, path, marker, trial });
     }
-    this.circuit = this.circuits[0]; this.path = this.circuit?.path;
+    this.circuit = this.circuits[0]; this.path = this.circuit?.path; this.records = {};
   }
   get starts() { return this.state === 'idle' && this.cool <= 0 ? this.circuits.map(c => [c.marker.position.x, c.marker.position.z]) : []; }
+  rec(name) { const r = this.records[name]; return r ? `${r.toFixed(1)} s` : 'sin récord'; }
   get active() { return this.state !== 'idle'; }
   get target() { return this.state === 'running' ? [this.cp.position.x, this.cp.position.z] : null; }
-  begin(car, circuit) {
-    this.circuit = circuit; this.path = circuit.path;
-    this.state = 'countdown'; this.t = 3.5; this.car = car; for (const c of this.circuits) c.marker.visible = false;
+  begin(car, circuit, trial = false) {
+    this.circuit = circuit; this.path = circuit.path; this.trial = trial;
+    this.state = 'countdown'; this.t = 3.5; this.car = car; for (const c of this.circuits) { c.marker.visible = false; c.trial.visible = false; }
     // parrilla: el jugador delante a la derecha, tres rivales
     const lanes = [-0.9, 0.9];
     const place = (c, s, lane) => { const p = this.path.at(s, lane), q = this.path.at(s + 3, lane); c.pos.x = p.x; c.pos.z = p.z; c.heading = Math.atan2(q.x - p.x, q.z - p.z); c.speed = 0; };
     place(car, 14, lanes[1]);
     const cols = [0xf2c200, 0x1b7f3a, 0xe8e8e8];
-    this.rivals = [[14, lanes[0], 12.5], [6, lanes[1], 13.5], [6, lanes[0], 11.5]].map(([s, lane, pace], k) => {
+    this.rivals = (trial ? [] : [[14, lanes[0], 12.5], [6, lanes[1], 13.5], [6, lanes[0], 11.5]]).map(([s, lane, pace], k) => {
       const c = this.makeCar(cols[k]); c.ai = new RaceDriver(c, this.path, lane, pace * circuit.pace, s); c.racer = true; return c;
     });
     this.onStart?.(car);
     this.next = 1; this.ncp = Math.floor(this.path.length / this.SP); this.placeCp();
-    this.toast(`🏁 ${circuit.name}`, `${(this.path.length / 1000).toFixed(1)} km · sigue los círculos azules y llega el primero`);
+    if (trial) this.toast(`⏱️ Contrarreloj: ${circuit.name}`, `${(this.path.length / 1000).toFixed(1)} km · récord: ${this.rec(circuit.name)}`);
+    else this.toast(`🏁 ${circuit.name}`, `${(this.path.length / 1000).toFixed(1)} km · sigue los círculos azules y llega el primero`);
   }
   placeCp() {
     const s = Math.min(this.path.length - 1, this.next * this.SP), p = this.path.at(s);
@@ -159,13 +164,15 @@ export class Race {
     if (this.cool > 0) this.cool -= dt;
     if (this.state === 'idle') {
       const show = this.cool <= 0 && !this.busy?.(); let near = null; this.nearName = null;
+      let nearTrial = null;
       for (const c of this.circuits) {
-        c.marker.visible = show;
-        const d = Math.hypot(pos.x - c.marker.position.x, pos.z - c.marker.position.z);
+        c.marker.visible = show; c.trial.visible = show;
+        const d = Math.hypot(pos.x - c.marker.position.x, pos.z - c.marker.position.z), dt2 = Math.hypot(pos.x - c.trial.position.x, pos.z - c.trial.position.z);
         if (show && d < 4) near = c;
-        if (show && d < 25) this.nearName = c.name;
+        if (show && dt2 < 3.5) { near = c; nearTrial = c; }
+        if (show && Math.min(d, dt2) < 25) this.nearName = `${c.name} (récord ${this.rec(c.name)}): rojo carrera, morado contrarreloj`;
       }
-      if (near && driving && !driving.wrecked) this.begin(driving, near);
+      if (near && driving && !driving.wrecked) this.begin(driving, near, nearTrial === near);
       this.nearOnFoot = !!near && !driving;
       return;
     }
@@ -189,14 +196,22 @@ export class Race {
     if (Math.hypot(pos.x - this.cp.position.x, pos.z - this.cp.position.z) < 9) {
       this.next++; this.sound?.('ok');
       if (this.next > this.ncp) {
+        const name = this.circuit.name, old = this.records[name], record = !old || this.time < old;
+        if (record) { this.records[name] = this.time; this.onRecord?.(); }
+        const rtxt = record ? ' · ¡nuevo récord!' : ` · récord ${old.toFixed(1)} s`;
+        if (this.trial) {
+          const prize = Math.round((record ? 60 : 10) * this.circuit.prize);
+          return this.end(record ? '⏱️ ¡Nuevo récord!' : '⏱️ Contrarreloj terminada', `${this.time.toFixed(1)} s${rtxt} · +${prize} €`, true, prize);
+        }
         const place = 1 + this.rivals.filter(r => r.ai.done).length, prize = Math.round([0, 150, 75, 30, 0][place] * this.circuit.prize);
-        return this.end(place === 1 ? '¡Has ganado la carrera!' : `Has llegado ${place}º`, `${this.time.toFixed(1)} s${prize ? ` · +${prize} €` : ''}`, true, prize);
+        return this.end(place === 1 ? '¡Has ganado la carrera!' : `Has llegado ${place}º`, `${this.time.toFixed(1)} s${rtxt}${prize ? ` · +${prize} €` : ''}`, true, prize);
       }
       this.placeCp();
     }
-    if (this.rivals.every(r => r.ai.done) && this.time > 0) { this.waitLast = (this.waitLast || 0) + dt; if (this.waitLast > 25) return this.end('Has llegado el último', 'Los rivales ya han cruzado la meta', false); }
+    if (this.rivals.length && this.rivals.every(r => r.ai.done) && this.time > 0) { this.waitLast = (this.waitLast || 0) + dt; if (this.waitLast > 25) return this.end('Has llegado el último', 'Los rivales ya han cruzado la meta', false); }
     const ps = this.playerS(), pos1 = 1 + this.rivals.filter(r => r.ai.s > ps).length;
-    this.write(`🏁 Punto <b>${Math.min(this.next, this.ncp)}/${this.ncp}</b> · ${pos1}º de 4 · ${this.time.toFixed(0)} s`);
+    if (this.trial) this.write(`⏱️ Punto <b>${Math.min(this.next, this.ncp)}/${this.ncp}</b> · <b>${this.time.toFixed(1)} s</b> · récord ${this.rec(this.circuit.name)}`);
+    else this.write(`🏁 Punto <b>${Math.min(this.next, this.ncp)}/${this.ncp}</b> · ${pos1}º de 4 · ${this.time.toFixed(0)} s`);
   }
   write(t) { if (this.ui.mission.innerHTML !== t) this.ui.mission.innerHTML = t; }
   end(title, sub, ok, prize = 0) {
