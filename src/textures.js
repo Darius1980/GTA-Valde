@@ -115,6 +115,13 @@ export function makeTextures(renderer) {
     for (let y = 0, row = 0; y < 64; y += 9, row++) for (let x = -(row % 2) * 14; x < 256; x += 28) { const v = (r() - 0.5) * 34; g.fillStyle = `rgb(${182 + v | 0},${96 + v * 0.5 | 0},${66 + v * 0.4 | 0})`; g.fillRect(x + 1, y + 1, 26, 7); }
     out.brick = tex(c);
   }
+  // mampostería de la iglesia: granito pardo y cuarcita ocre con mucho mortero de cal y líquenes
+  {
+    const [c, g] = canvas(512, 384); const r = rng(61);
+    drawStone(g, 512, 384, r, [[196, 170, 136], [182, 150, 112], [204, 178, 142], [168, 140, 108], [150, 136, 118], [190, 140, 100], [210, 188, 156], [140, 126, 110]], 1.45, '#d4cab6');
+    for (let i = 0; i < 60; i++) { g.fillStyle = r() < 0.5 ? 'rgba(220,214,200,0.25)' : 'rgba(70,74,60,0.12)'; g.beginPath(); g.arc(r() * 512, r() * 384, 3 + r() * 16, 0, 7); g.fill(); }
+    out.churchStone = tex(c);
+  }
   // Sillería de granito (iglesia)
   {
     const [c, g] = canvas(512, 384); const r = rng(51);
@@ -153,8 +160,10 @@ export function makeTextures(renderer) {
   // Asfalto
   {
     const [c, g] = canvas(256, 256); const r = rng(9);
-    g.fillStyle = '#55575a'; g.fillRect(0, 0, 256, 256);
-    for (let i = 0; i < 9000; i++) { const v = 60 + r() * 70 | 0; g.fillStyle = `rgba(${v},${v},${v + 3},0.5)`; g.fillRect(r() * 256, r() * 256, 1 + r() * 2, 1 + r() * 2); }
+    // asfalto viejo de pueblo: gris claro, con árido a la vista y parches más oscuros (Street View)
+    g.fillStyle = '#6f6e6a'; g.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 5; i++) { g.fillStyle = r() < 0.5 ? 'rgba(40,40,42,0.18)' : 'rgba(160,150,135,0.12)'; const x = r() * 256, y = r() * 256; g.fillRect(x, y, 30 + r() * 80, 20 + r() * 60); }
+    for (let i = 0; i < 11000; i++) { const v = 70 + r() * 90 | 0; g.fillStyle = `rgba(${v + 4},${v},${v - 4},0.5)`; g.fillRect(r() * 256, r() * 256, 1 + r() * 2, 1 + r() * 2); }
     for (let i = 0; i < 6; i++) { g.strokeStyle = 'rgba(25,25,25,0.4)'; g.lineWidth = 1; g.beginPath(); let x = r() * 256, y = r() * 256; g.moveTo(x, y); for (let k = 0; k < 6; k++) { x += (r() - .5) * 40; y += (r() - .5) * 40; g.lineTo(x, y); } g.stroke(); }
     out.asphalt = tex(c);
   }

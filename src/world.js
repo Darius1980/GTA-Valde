@@ -166,7 +166,7 @@ export function buildBuildings(data, terrain, tex, colliders) {
     const floors = Math.max(1, b.f || 1);
     const floorH = urban ? 2.85 : 2.9;
     const isChurch = data.church && b.id === data.church && Math.abs(signedArea(pts)) > 100;
-    let eave = isChurch ? top + 7.5 : b.eave != null ? Math.max(b.eave, top + 2.4) : top + (b.use === 'agr' ? 3.2 + 0.6 * rnd() : floors * floorH + (urban ? 1.2 : 0.3));
+    let eave = isChurch ? top + 5.6 : b.eave != null ? Math.max(b.eave, top + 2.4) : top + (b.use === 'agr' ? 3.2 + 0.6 * rnd() : floors * floorH + (urban ? 1.2 : 0.3));
     const y0 = base - 0.6;
     const ob = obb(pts); if (!ob) continue;
     const width = ob.mxv - ob.mnv, length = ob.mxu - ob.mnu;
@@ -187,6 +187,7 @@ export function buildBuildings(data, terrain, tex, colliders) {
     else { const k = rnd() < 0.35 ? 1 : 0; wallB = k ? plaster : facade; gB = k ? (floors > 1 && rnd() < 0.7 ? facadeGround : plasterGround) : facadeGround; } // revocadas arriba y de piedra abajo, como en la calle del Río
     const t = 0.82 + rnd() * 0.25;
     for (const gb of [facade, plaster, facadeGround, plasterGround, stone, ashlar, ...urbanB, ...groundB]) gb.tint = [t, t * (0.97 + rnd() * 0.05), t * (0.95 + rnd() * 0.05)];
+    if (isChurch) ashlar.tint = [1, 1, 1];
     const age = rnd(); roof.tint = [0.75 + 0.3 * (1 - age), 0.72 + 0.25 * (1 - age) + 0.08 * age, 0.7 + 0.2 * age];
     const gH = urban ? 3.6 : 3.0, gTop = top + gH; // planta baja
     const u0 = rnd(); // la puerta cae en un sitio distinto en cada casa
@@ -294,7 +295,7 @@ export function buildBuildings(data, terrain, tex, colliders) {
   add(facade, litWindows(new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facade, roughness: 0.92 }), tex.facadeNight));
   add(plaster, litWindows(new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facadePlaster, roughness: 0.95 }), tex.facadePlasterNight));
   add(stone, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.stone, roughness: 0.95 }));
-  add(ashlar, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.ashlar, roughness: 0.9 }));
+  add(ashlar, new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.churchStone, roughness: 0.95 }));
   add(facadeGround, litWindows(new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facadeGround, roughness: 0.92 }), tex.facadeGroundNight));
   add(plasterGround, litWindows(new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.facadePlasterGround, roughness: 0.95 }), tex.facadePlasterGroundNight));
   if (church) group.add(buildChurchDetails(church, terrain, tex, colliders));
@@ -328,18 +329,23 @@ function roofExtras(list) {
 // Espadaña (campanario de muro típico de Zamora), portada y campanas
 function buildChurchDetails(c, terrain, tex, colliders) {
   const group = new THREE.Group();
-  const stoneTex = tex.ashlar.clone(); stoneTex.needsUpdate = true; stoneTex.repeat.set(0.25, 1 / 3);
-  const stoneMat = new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.9, color: 0xe6ddd0 });
+  const stoneTex = tex.churchStone.clone(); stoneTex.needsUpdate = true; stoneTex.repeat.set(0.25, 1 / 3);
+  const stoneMat = new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.95, color: 0xeeeae2 });
+  const graniteTex = tex.ashlar.clone(); graniteTex.needsUpdate = true; graniteTex.repeat.set(0.5, 1);
+  const granite = new THREE.MeshStandardMaterial({ map: graniteTex, roughness: 0.9, color: 0xc8c4bc });
   // extremos del eje largo: la espadaña va en el hastial de poniente (x menor)
   let mn = Infinity, mx = -Infinity;
   for (const p of c.pts) { const u = p[0] * c.rx + p[1] * c.rz; mn = Math.min(mn, u); mx = Math.max(mx, u); }
   const west = c.rx > 0 ? mn : mx, dirOut = c.rx > 0 ? -1 : 1; // hacia fuera del templo
   const cx = c.rx * west + c.nx * c.mid, cz = c.rz * west + c.nz * c.mid;
-  const ridge = c.eave + c.slope * c.half, H = ridge + 6.5 - c.y0, W = 4.6, T = 1.1;
+  const ridge = c.eave + c.slope * c.half, H = ridge + 6.2 - c.y0, W = 4.4, T = 1.0;
+  const yb = ridge - c.y0 + 0.5, yTop = yb + 2.3; // vanos de las campanas y arranque del remate apuntado
   const sh = new THREE.Shape();
-  sh.moveTo(-W / 2, 0); sh.lineTo(W / 2, 0); sh.lineTo(W / 2, H - 2.2); sh.lineTo(0.35, H); sh.lineTo(-0.35, H); sh.lineTo(-W / 2, H - 2.2); sh.closePath();
+  sh.moveTo(-W / 2 - 0.5, 0); sh.lineTo(W / 2 + 0.5, 0); sh.lineTo(W / 2 + 0.5, yb - 2.2); sh.lineTo(W / 2, yb - 1.4); // contrafuerte que se estrecha
+  sh.lineTo(W / 2, yTop); sh.quadraticCurveTo(W / 2 - 0.2, H - 1.2, 0.08, H); sh.lineTo(-0.08, H); sh.quadraticCurveTo(-W / 2 + 0.2, H - 1.2, -W / 2, yTop);
+  sh.lineTo(-W / 2, yb - 1.4); sh.lineTo(-W / 2 - 0.5, yb - 2.2); sh.closePath();
   const arch = (x, y, w, h) => { const a = new THREE.Path(); a.moveTo(x - w / 2, y); a.lineTo(x + w / 2, y); a.lineTo(x + w / 2, y + h - w / 2); a.absarc(x, y + h - w / 2, w / 2, 0, Math.PI, false); a.closePath(); return a; };
-  const yb = ridge - c.y0 + 0.4, bells = [[-1.05, yb, 1.15, 2.4], [1.05, yb, 1.15, 2.4], [0, yb + 3.0, 0.85, 1.7]];
+  const bells = [[-1.0, yb, 1.05, 2.0], [1.0, yb, 1.05, 2.0]];
   for (const b of bells) sh.holes.push(arch(...b));
   const g = new THREE.ExtrudeGeometry(sh, { depth: T, bevelEnabled: false, curveSegments: 8 });
   g.translate(0, 0, -T / 2);
@@ -360,20 +366,43 @@ function buildChurchDetails(c, terrain, tex, colliders) {
     const yoke = new THREE.Mesh(new THREE.BoxGeometry(bw, 0.12, 0.14), new THREE.MeshStandardMaterial({ color: 0x3a2a1a })); yoke.position.set(bx, by + bh - bw / 2 + 0.06, 0); esp.add(yoke);
   }
   group.userData.bellTower.bells = swing;
+  const ledge = new THREE.Mesh(new THREE.BoxGeometry(W + 0.3, 0.18, T + 0.25), granite); ledge.position.set(0, yb - 0.09, 0); esp.add(ledge);
+  // poyo de granito al pie de los muros y pórtico con pilares de ladrillo y rejas en la fachada sur
+  const P = c.pts, n = P.length; let best = null;
+  for (let i = 0; i < n; i++) {
+    const a = P[i], b = P[(i + 1) % n], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 1) continue;
+    let ox = -(b[1] - a[1]) / L, oz = (b[0] - a[0]) / L; // normal hacia fuera
+    let cx0 = 0, cz0 = 0; for (const p of P) { cx0 += p[0] / n; cz0 += p[1] / n; }
+    if (((a[0] + b[0]) / 2 - cx0) * ox + ((a[1] + b[1]) / 2 - cz0) * oz < 0) { ox = -ox; oz = -oz; }
+    const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2, ya = terrain.height(mx, mz);
+    const pt = tex.ashlar.clone(); pt.needsUpdate = true; pt.repeat.set(L / 2, 0.3);
+    const poyo = new THREE.Mesh(new THREE.BoxGeometry(L, 0.6, 0.5), new THREE.MeshStandardMaterial({ map: pt, roughness: 0.9, color: 0xb8b4ac }));
+    poyo.position.set(mx + ox * 0.25, ya + 0.1, mz + oz * 0.25); poyo.rotation.y = Math.atan2(b[0] - a[0], b[1] - a[1]) - Math.PI / 2; poyo.castShadow = true; group.add(poyo);
+    if (oz > 0.85 && L > 4 && (!best || mz > best.mz)) best = { a, b, L, ox, oz, mz };
+  }
+  if (best) {
+    const { a, b, L, ox, oz } = best, rot = Math.atan2(b[0] - a[0], b[1] - a[1]) - Math.PI / 2;
+    const bt = tex.brick.clone(); bt.needsUpdate = true; bt.repeat.set(0.25, 6);
+    const brickMat = new THREE.MeshStandardMaterial({ map: bt, roughness: 0.9 }), dark = new THREE.MeshStandardMaterial({ color: 0x2a2622, roughness: 1 }), bars = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, metalness: 0.5, roughness: 0.5 });
+    const k = 4, yb0 = Math.min(terrain.height(a[0], a[1]), terrain.height(b[0], b[1]));
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(L, 0.25, 0.3), new THREE.MeshStandardMaterial({ color: 0x6a4428, roughness: 0.9 }));
+    beam.position.set((a[0] + b[0]) / 2 + ox * 0.2, yb0 + 3.1, (a[1] + b[1]) / 2 + oz * 0.2); beam.rotation.y = rot; group.add(beam);
+    for (let i = 0; i < k; i++) {
+      const t = (i + 0.5) / k, x = a[0] + (b[0] - a[0]) * t + ox * 0.2, z = a[1] + (b[1] - a[1]) * t + oz * 0.2;
+      if (i < k - 1) { const tp = (i + 1) / k, px = a[0] + (b[0] - a[0]) * tp + ox * 0.2, pz = a[1] + (b[1] - a[1]) * tp + oz * 0.2;
+        const pil = new THREE.Mesh(new THREE.BoxGeometry(0.45, 3.0, 0.45), brickMat); pil.position.set(px, yb0 + 1.5, pz); pil.rotation.y = rot; pil.castShadow = true; group.add(pil); }
+      // reja de barrotes con su puerta de chapa abajo
+      const w = L / k - 0.5, gr = new THREE.Group(); gr.position.set(x, yb0 + 0.6, z); gr.rotation.y = rot; group.add(gr);
+      const back = new THREE.Mesh(new THREE.PlaneGeometry(L / k - 0.45, 2.4), dark); back.position.set(0, 0.9, -0.12); gr.add(back);
+      for (let j = 0; j <= w / 0.14; j++) { const bar = new THREE.Mesh(new THREE.BoxGeometry(0.025, 2.2, 0.025), bars); bar.position.set(-w / 2 + j * 0.14, 1.1, 0); gr.add(bar); }
+      for (const yy of [0.05, 1.0, 2.2]) { const rail = new THREE.Mesh(new THREE.BoxGeometry(w, 0.05, 0.04), bars); rail.position.set(0, yy, 0); gr.add(rail); }
+    }
+  }
   // cruz de forja en lo alto
   const iron = new THREE.MeshStandardMaterial({ color: 0x1e1e1e, metalness: 0.7, roughness: 0.5 });
   const cv = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.1, 0.08), iron); cv.position.set(0, H + 0.55, 0); esp.add(cv);
   const ch = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.08, 0.08), iron); ch.position.set(0, H + 0.75, 0); esp.add(ch);
-  // portada de medio punto en el hastial, bajo la espadaña
-  const doorSh = new THREE.Shape(); const dw = 1.7, dh = 3.3;
-  doorSh.moveTo(-dw / 2, 0); doorSh.lineTo(dw / 2, 0); doorSh.lineTo(dw / 2, dh - dw / 2); doorSh.absarc(0, dh - dw / 2, dw / 2, 0, Math.PI, false); doorSh.closePath();
-  const by0 = terrain.height(cx + c.rx * dirOut * T, cz + c.rz * dirOut * T) - c.y0;
-  const zf = dirOut * (T / 2);
-  const frame = new THREE.Mesh(new THREE.ShapeGeometry(doorSh, 12), stoneMat); frame.scale.set(1.35, 1.12, 1);
-  const door = new THREE.Mesh(new THREE.ShapeGeometry(doorSh, 12), new THREE.MeshStandardMaterial({ color: 0x3b2616, roughness: 0.8 }));
-  frame.position.set(0, by0, zf + dirOut * 0.01); door.position.set(0, by0, zf + dirOut * 0.03);
-  if (dirOut < 0) frame.rotation.y = door.rotation.y = Math.PI;
-  esp.add(frame, door);
+  // (la iglesia de Valde no tiene puerta en el hastial de la espadaña: se entra por el pórtico del sur)
   return group;
 }
 
@@ -416,7 +445,7 @@ function norm(v) { const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1]
 // ---------- carreteras y calles: cintas sobre el terreno ----------
 export function buildRoads(data, terrain, tex, colliders) {
   const byMat = { asphalt: new GeoBuilder(), concrete: new GeoBuilder(), dirt: new GeoBuilder(), sidewalk: new GeoBuilder() };
-  const urban = data.style === 'urban', lamps = [];
+  const urban = data.style === 'urban', lamps = []; let lampsExtra = [];
   const STREET = new Set(['residential', 'tertiary', 'secondary', 'primary', 'unclassified', 'living_street', 'tertiary_link', 'secondary_link']);
   // aceras de baldosa a ambos lados de las calles (solo en ciudad)
   if (urban) for (const r of data.roads) {
@@ -456,9 +485,7 @@ export function buildRoads(data, terrain, tex, colliders) {
     }
   }
   for (const r of data.roads) {
-    // las calles del pueblo son de hormigón (como la calle del Río en Street View); las carreteras, de asfalto
-    const villageStreet = !urban && (r.k === 'residential' || r.k === 'living_street') && r.s === 'asphalt';
-    const gb = villageStreet ? byMat.concrete : byMat[r.s] || byMat.asphalt; const hw = r.w / 2;
+    const gb = byMat[r.s] || byMat.asphalt; const hw = r.w / 2;
     const P = densify(r.p, 2.5); let dist = 0;
     for (let i = 0; i < P.length - 1; i++) {
       const a = P[i], b = P[i + 1];
@@ -523,8 +550,9 @@ export function buildRoads(data, terrain, tex, colliders) {
     });
     im.castShadow = true; group.add(im, ih); group.userData.lamps = lamps;
   }
-  if (!urban && colliders) group.add(utilityPoles(data, terrain, colliders));
+  if (!urban && colliders) { const up = utilityPoles(data, terrain, colliders); group.add(up); lampsExtra = up.userData.lamps || []; }
   if (lines.pos.length) group.add(new THREE.Mesh(lines.build(), new THREE.MeshStandardMaterial({ color: 0xe8e8e0, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -4 })));
+  if (lampsExtra.length) group.userData.lamps = [...(group.userData.lamps || []), ...lampsExtra];
   return group;
 }
 // postes de madera del tendido eléctrico con su farola de brazo y los cables combados entre poste y poste
@@ -560,14 +588,16 @@ function utilityPoles(data, terrain, colliders) {
   const sq = new THREE.BoxGeometry(0.2, H, 0.16); sq.translate(0, H / 2, 0);
   const ipW = new THREE.InstancedMesh(mergeGeometries([pole, cross]), wood, Math.max(1, nW)), ipC = new THREE.InstancedMesh(mergeGeometries([sq, cross.clone()]), concrete, Math.max(1, poles.length - nW));
   ipW.count = nW; ipC.count = poles.length - nW; 
-  let iW = 0, iC = 0;
+  let iW = 0, iC = 0; const lampsOut = [];
   const ia = new THREE.InstancedMesh(arm, metal, poles.length), ih = new THREE.InstancedMesh(head, lampMat, poles.length);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
   poles.forEach(([x, z, rot], i) => {
     q.setFromAxisAngle(up, rot); m.compose(new THREE.Vector3(x, terrain.height(x, z), z), q, one);
     (kind[i] ? ipC : ipW).setMatrixAt(kind[i] ? iC++ : iW++, m); ia.setMatrixAt(i, m); ih.setMatrixAt(i, m);
     colliders.addSegment(x - 0.12, z, x + 0.12, z, 'tree');
+    const y = terrain.height(x, z); lampsOut.push([x, z, rot, x + Math.sin(rot) * 1.45, y + H - 1.5, z + Math.cos(rot) * 1.45]);
   });
+  g.userData.lamps = lampsOut;
   ipW.castShadow = ipC.castShadow = true; g.add(ipW, ipC, ia, ih);
   // dos cables por vano, a los extremos de la cruceta, con su catenaria
   const pts = [];
@@ -721,13 +751,13 @@ export function buildTerrain(meta, terrain, orthoFull, orthoCenter, tex, mask = 
   const fb = meta.ortho.full, cb = meta.ortho.center;
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.tCenter = { value: orthoCenter }; sh.uniforms.tDetail = { value: tex.detail };
-    sh.uniforms.tMask = { value: mask?.tex || null }; sh.uniforms.maskB = { value: mask?.bounds || new THREE.Vector4(0, 0, 1, 1) }; sh.uniforms.tAsph = { value: tex.asphalt }; sh.uniforms.tConc = { value: tex.concrete };
+    sh.uniforms.tMask = { value: mask?.tex || null }; sh.uniforms.maskB = { value: mask?.bounds || new THREE.Vector4(0, 0, 1, 1) }; sh.uniforms.tAsph = { value: tex.asphalt }; sh.uniforms.tConc = { value: tex.concrete }; sh.uniforms.tDirt = { value: tex.dirt };
     sh.uniforms.fullB = { value: new THREE.Vector4(...fb) }; sh.uniforms.centerB = { value: new THREE.Vector4(...cb) };
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = (modelMatrix * vec4(transformed,1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
       varying vec3 vWPos; uniform sampler2D tCenter; uniform sampler2D tDetail; uniform vec4 fullB; uniform vec4 centerB;
-      uniform sampler2D tMask; uniform sampler2D tAsph; uniform sampler2D tConc; uniform vec4 maskB;`)
+      uniform sampler2D tMask; uniform sampler2D tAsph; uniform sampler2D tConc; uniform sampler2D tDirt; uniform vec4 maskB;`)
       .replace('#include <map_fragment>', `
       vec2 uvF = vec2((vWPos.x - fullB.x) / (fullB.z - fullB.x), (vWPos.z - fullB.y) / (fullB.w - fullB.y));
       vec4 col = texture2D(map, uvF);
@@ -743,6 +773,10 @@ export function buildTerrain(meta, terrain, orthoFull, orthoCenter, tex, mask = 
       if (uvM.x > 0.0 && uvM.x < 1.0 && uvM.y > 0.0 && uvM.y < 1.0) {
         vec4 mk = texture2D(tMask, uvM); float a = smoothstep(0.25, 0.75, mk.r);
         vec3 asph = mix(texture2D(tConc, vWPos.xz / 4.0).rgb, texture2D(tAsph, vWPos.xz / 4.0).rgb, smoothstep(0.3, 0.7, mk.g / max(mk.r, 0.01))) * (0.92 + 0.16 * d);
+        // fuera de la calle, dentro del pueblo: tierra (la ortofoto de cerca es una mancha)
+        float vf = 1.0 - smoothstep(200.0, 290.0, length(vWPos.xz - maskB.xy - maskB.zw * 0.5));
+        vec3 dirt = texture2D(tDirt, vWPos.xz / 3.0).rgb;
+        col.rgb = mix(col.rgb, col.rgb * 0.45 + dirt * 0.65, 0.7 * vf * (1.0 - a));
         col.rgb = mix(col.rgb, asph, a);
       }` : ''}
       diffuseColor *= col;`);
@@ -781,9 +815,9 @@ export function smoothRoads(roads, iters = 2) {
 export function villageMask(data, center, R = 320, size = 1024) {
   const c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d');
   const s = size / (2 * R), X = (x) => (x - center[0] + R) * s, Y = (z) => (z - center[1] + R) * s;
-  // rojo: suelo pavimentado; verde: de asfalto (carreteras). Las calles sin verde son de hormigón.
+  // rojo: suelo pavimentado; verde: de asfalto. Hoy todo es asfalto, el canal queda por si alguna calle es de hormigón.
   g.lineCap = 'round'; g.lineJoin = 'round'; g.filter = 'blur(2px)';
-  const conc = (r) => r.k === 'residential' || r.k === 'living_street';
+  const conc = () => false; // todo asfalto (hormigón descartado tras verlo Darío)
   for (const pass of [0, 1]) for (const r of data.roads) {
     if (r.k === 'track' || r.k === 'path' || r.k === 'trunk') continue;
     if (pass !== (conc(r) ? 0 : 1)) continue;

@@ -94,8 +94,8 @@ export class DayNight {
 
     // luces de farola: unas pocas luces puntuales que se mueven a las farolas más cercanas
     this.lampLights = [];
-    for (let i = 0; i < (isMobile ? 4 : 6); i++) {
-      const l = new THREE.PointLight(0xffc77a, 0, 22, 1.6); scene.add(l); this.lampLights.push(l);
+    for (let i = 0; i < (isMobile ? 6 : 10); i++) {
+      const l = new THREE.PointLight(0xffd29a, 0, 36, 1.5); scene.add(l); this.lampLights.push(l);
     }
     this.lamps = []; this.lastLampPick = -1;
   }
@@ -138,12 +138,12 @@ export class DayNight {
       this.sun.intensity = up ? 0.15 + 0.4 * illum : 0.12;
       this.light = up ? this.moonDir : (this._zen || (this._zen = new THREE.Vector3(-0.3, 0.9, 0.3).normalize()));
     }
-    this.hemi.intensity = 0.2 + 0.7 * day + 0.06 * illum * this.n;
-    this.hemi.color.setRGB(0.75 - 0.4 * this.n, 0.83 - 0.35 * this.n, 0.93 - 0.2 * this.n);
+    this.hemi.intensity = 0.45 + 0.45 * day + 0.15 * illum * this.n;
+    this.hemi.color.setRGB(0.75 - 0.27 * this.n, 0.83 - 0.22 * this.n, 0.93 - 0.08 * this.n);
     const fog = this.scene.fog;
     fog.color.copy(DAY_FOG).lerp(DUSK_FOG, dusk * 0.7).lerp(NIGHT_FOG, this.n);
-    fog.near = 250 - 170 * this.n; fog.far = 1600 - 1000 * this.n;
-    this.renderer.toneMappingExposure = 0.9 - 0.15 * this.n;
+    fog.near = 250 - 110 * this.n; fog.far = 1600 - 650 * this.n;
+    this.renderer.toneMappingExposure = 0.9 + 0.05 * this.n;
 
     // estrellas y luna
     const t = performance.now() / 1000;
@@ -181,6 +181,6 @@ export class DayNight {
       const near = this.lamps.map(l => [l, (l[3] - focus.x) ** 2 + (l[5] - focus.z) ** 2]).sort((a, b) => a[1] - b[1]);
       this.lampLights.forEach((L, i) => { const l = near[i]?.[0]; if (l) L.position.set(l[3], l[4] - 0.3, l[5]); L.userData.ok = !!l; });
     }
-    for (const L of this.lampLights) L.intensity = L.userData.ok ? 9 * on : 0;
+    for (const L of this.lampLights) L.intensity = L.userData.ok ? 22 * on : 0;
   }
 }
