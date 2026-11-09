@@ -16,7 +16,25 @@ export class Terrain {
     // mismos triángulos que la malla (diagonal b-c): el coche y las carreteras pisan justo el suelo dibujado
     return u + v <= 1 ? a + (b - a) * u + (c - a) * v : d + (c - d) * (1 - u) + (b - d) * (1 - v);
   }
+  // tableros de los puentes: el suelo transitable pasa por encima del cauce
+  addDeck(ax, az, bx, bz, ya, yb, hw) {
+    const s = { ax, az, bx, bz, ya, yb, hw }, C = 32; this.decks = this.decks || new Map();
+    for (let i = Math.floor((Math.min(ax, bx) - hw) / C); i <= Math.floor((Math.max(ax, bx) + hw) / C); i++)
+      for (let j = Math.floor((Math.min(az, bz) - hw) / C); j <= Math.floor((Math.max(az, bz) + hw) / C); j++) {
+        const k = i * 100003 + j; if (!this.decks.has(k)) this.decks.set(k, []); this.decks.get(k).push(s);
+      }
+  }
   height(x, z) {
+    const g = this.ground(x, z); if (!this.decks) return g;
+    const list = this.decks.get(Math.floor(x / 32) * 100003 + Math.floor(z / 32)); if (!list) return g;
+    let best = g;
+    for (const s of list) {
+      const dx = s.bx - s.ax, dz = s.bz - s.az, L = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((x - s.ax) * dx + (z - s.az) * dz) / L));
+      if (Math.hypot(x - s.ax - dx * t, z - s.az - dz * t) < s.hw) best = Math.max(best, s.ya + (s.yb - s.ya) * t);
+    }
+    return best;
+  }
+  ground(x, z) {
     if (!this.o) return this.innerHeight(x, z);
     const m = Math.max(Math.abs(x), Math.abs(z)), E = this.E;
     if (m <= E - 150) return this.innerHeight(x, z);
@@ -780,7 +798,7 @@ export function buildTerrain(meta, terrain, orthoFull, orthoCenter, tex, mask = 
   const geo = new THREE.PlaneGeometry(size, size, n - 1, n - 1); geo.rotateX(-Math.PI / 2);
   geo.translate(meta.origin[0] + size / 2, 0, meta.origin[1] + size / 2);
   const p = geo.attributes.position;
-  for (let i = 0; i < p.count; i++) p.setY(i, terrain.height(p.getX(i), p.getZ(i)));
+  for (let i = 0; i < p.count; i++) p.setY(i, terrain.ground(p.getX(i), p.getZ(i)));
   geo.computeVertexNormals();
   const mesh = new THREE.Mesh(geo, terrainMaterial(orthoFull, orthoCenter, meta.ortho.full, meta.ortho.center, tex, mask)); mesh.receiveShadow = true;
   return mesh;
@@ -868,4 +886,51 @@ export function villageMask(data, center, R = 320, size = 1024) {
   grad.addColorStop(0, '#fff'); grad.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = grad; g.fillRect(0, 0, size, size);
   const t = new THREE.CanvasTexture(c); t.flipY = false; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false;
   return { tex: t, bounds: new THREE.Vector4(center[0] - R, center[1] - R, 2 * R, 2 * R) };
+}
+
+// ---------- puentes: tablero recto de orilla a orilla, pretiles de piedra y pilas ----------
+export function buildBridges(roads, terrain, tex, colliders) {
+  const deck = new GeoBuilder(), wall = new GeoBuilder();
+  for (const r of roads) {
+    if (!r.bridge || r.p.length < 2) continue;
+    const P = r.p, hw = r.w / 2 + 0.5;
+    let L = 0; const acc = [0]; for (let i = 1; i < P.length; i++) acc.push(L += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+    if (L < 3) continue;
+    const ha = terrain.ground(P[0][0], P[0][1]), hb = terrain.ground(P[P.length - 1][0], P[P.length - 1][1]);
+    const D = densify(P, 3), Y = [];
+    let a2 = 0; for (let i = 0; i < D.length; i++) { if (i) a2 += Math.hypot(D[i][0] - D[i - 1][0], D[i][1] - D[i - 1][1]); Y.push(Math.max(ha + (hb - ha) * a2 / L, terrain.ground(D[i][0], D[i][1])) + 0.1); }
+    for (let i = 0; i < D.length - 1; i++) terrain.addDeck(D[i][0], D[i][1], D[i + 1][0], D[i + 1][1], Y[i], Y[i + 1], hw);
+    let dist = 0;
+    for (let i = 0; i < D.length - 1; i++) {
+      const a = D[i], b = D[i + 1], na = sideNormal(D, i), nb = sideNormal(D, i + 1), l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      for (const side of [1, -1]) {
+        const o = side * hw, A = [a[0] + na[0] * o, a[1] + na[1] * o], B = [b[0] + nb[0] * o, b[1] + nb[1] * o];
+        const ya = Y[i], yb = Y[i + 1], bot = 0.9;
+        // pretil (0,8 m) y canto del tablero
+        const q = (y0a, y1a, y0b, y1b) => side > 0
+          ? wall.quad([A[0], y0a, A[1]], [B[0], y0b, B[1]], [B[0], y1b, B[1]], [A[0], y1a, A[1]], [dist / 2, y0a / 2], [(dist + l) / 2, y0b / 2], [(dist + l) / 2, y1b / 2], [dist / 2, y1a / 2])
+          : wall.quad([B[0], y0b, B[1]], [A[0], y0a, A[1]], [A[0], y1a, A[1]], [B[0], y1b, B[1]], [(dist + l) / 2, y0b / 2], [dist / 2, y0a / 2], [dist / 2, y1a / 2], [(dist + l) / 2, y1b / 2]);
+        q(ya - bot, ya + 0.8, yb - bot, yb + 0.8);
+        const In = [a[0] + na[0] * (o - side * 0.35), a[1] + na[1] * (o - side * 0.35)], Ib = [b[0] + nb[0] * (o - side * 0.35), b[1] + nb[1] * (o - side * 0.35)];
+        wall.quad([In[0], ya + 0.8, In[1]], [A[0], ya + 0.8, A[1]], [B[0], yb + 0.8, B[1]], [Ib[0], yb + 0.8, Ib[1]], [0, 0], [0.2, 0], [0.2, 1], [0, 1]);
+        if (side < 0) wall.quad([B[0], yb + 0.8, B[1]], [A[0], ya + 0.8, A[1]], [In[0], ya + 0.8, In[1]], [Ib[0], yb + 0.8, Ib[1]], [0, 0], [0.2, 0], [0.2, 1], [0, 1]);
+        if (colliders) colliders.addSegment(A[0], A[1], B[0], B[1]);
+      }
+      // panza del tablero
+      const pa = [a[0] + na[0] * hw, a[1] + na[1] * hw], qa = [a[0] - na[0] * hw, a[1] - na[1] * hw], pb = [b[0] + nb[0] * hw, b[1] + nb[1] * hw], qb = [b[0] - nb[0] * hw, b[1] - nb[1] * hw];
+      deck.quad([pa[0], Y[i] - 0.9, pa[1]], [qa[0], Y[i] - 0.9, qa[1]], [qb[0], Y[i + 1] - 0.9, qb[1]], [pb[0], Y[i + 1] - 0.9, pb[1]], [0, 0], [1, 0], [1, 1], [0, 1]);
+      // pilas donde el tablero va alto
+      const gap = Y[i] - terrain.ground(a[0], a[1]);
+      if (gap > 2 && Math.floor((dist + l) / 14) > Math.floor(dist / 14)) {
+        const g0 = terrain.ground(a[0], a[1]) - 1, w = hw * 0.8, t = 0.8, ux = (b[0] - a[0]) / l, uz = (b[1] - a[1]) / l;
+        const c = [[-w, -t], [w, -t], [w, t], [-w, t]].map(([s1, s2]) => [a[0] + na[0] * s1 + ux * s2, a[1] + na[1] * s1 + uz * s2]);
+        for (let k = 0; k < 4; k++) { const p0 = c[k], p1 = c[(k + 1) % 4]; wall.quad([p1[0], g0, p1[1]], [p0[0], g0, p0[1]], [p0[0], Y[i] - 0.9, p0[1]], [p1[0], Y[i] - 0.9, p1[1]], [0, 0], [1, 0], [1, gap / 2], [0, gap / 2]); }
+      }
+      dist += l;
+    }
+  }
+  const g = new THREE.Group();
+  if (wall.pos.length) { const m = new THREE.Mesh(wall.build(), new THREE.MeshStandardMaterial({ map: tex.stone, roughness: 0.95, vertexColors: true, side: THREE.DoubleSide })); m.castShadow = m.receiveShadow = true; g.add(m); }
+  if (deck.pos.length) g.add(new THREE.Mesh(deck.build(), new THREE.MeshStandardMaterial({ color: 0x7d7568, roughness: 1, side: THREE.DoubleSide })));
+  return g;
 }

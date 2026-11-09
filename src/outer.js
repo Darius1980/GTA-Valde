@@ -1,7 +1,7 @@
 // Entorno lejano (radio de 10 km): relieve con ortofoto, carreteras y caminos, pueblos de alrededor y encinas.
 // Todo va por teselas que se construyen al acercarse y se ocultan más allá de la niebla.
 import * as THREE from 'three';
-import { buildBuildings, buildRoads, terrainMaterial, crownGeometry, smoothRoads } from './world.js';
+import { buildBuildings, buildRoads, terrainMaterial, crownGeometry, smoothRoads, buildBridges } from './world.js';
 import { weatherize } from './weather.js';
 
 const TILE = 2000; // teselas de carreteras, edificios y árboles
@@ -45,11 +45,35 @@ export class Outer {
     this.tiles = new Map();
     const tile = (x, z) => { const k = `${Math.floor(x / TILE)},${Math.floor(z / TILE)}`; if (!this.tiles.has(k)) this.tiles.set(k, { k, roads: [], b: [], trees: [], built: false, obj: null, cx: (Math.floor(x / TILE) + 0.5) * TILE, cz: (Math.floor(z / TILE) + 0.5) * TILE }); return this.tiles.get(k); };
     smoothRoads(data.roads);
+    this.group.add(buildBridges(data.roads, terrain, tex, colliders));
+    // ---- agua: láminas de embalses y lagunas a la altura de su orilla, y ríos y arroyos como cintas
+    this.waterMat = new THREE.MeshStandardMaterial({ color: 0x35525a, roughness: 0.12, metalness: 0.25, transparent: true, opacity: 0.9, polygonOffset: true, polygonOffsetFactor: -3 });
+    this.ponds = [];
+    const W = data.water || { polys: [], rivers: [] }, pondGeo = [];
+    for (const w of W.polys) {
+      const hs = [];
+      for (let i = 0; i < w.p.length; i++) { const a = w.p[i], b = w.p[(i + 1) % w.p.length], k = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 10)); for (let t = 0; t < k; t++) hs.push(terrain.ground(a[0] + (b[0] - a[0]) * t / k, a[1] + (b[1] - a[1]) * t / k)); }
+      hs.sort((a, b) => a - b); const y = hs[Math.floor(hs.length * 0.1)] + 0.35;
+      const shape = new THREE.Shape(w.p.map(q => new THREE.Vector2(q[0], -q[1])));
+      for (const hl of w.h || []) shape.holes.push(new THREE.Path(hl.map(q => new THREE.Vector2(q[0], -q[1]))));
+      const g = new THREE.ShapeGeometry(shape); g.rotateX(-Math.PI / 2); g.translate(0, y, 0); pondGeo.push(g);
+      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const [x, z] of w.p) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+      this.ponds.push({ p: w.p, y, x0, x1, z0, z1 });
+    }
+    for (const g of pondGeo) { const m = new THREE.Mesh(g, this.waterMat); m.receiveShadow = true; this.group.add(m); }
     for (const r of data.roads) { // cada carretera se trocea por teselas
       let cur = null, curT = null;
       for (let i = 0; i < r.p.length - 1; i++) {
         const a = r.p[i], b = r.p[i + 1], T = tile((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
         if (T !== curT) { cur = { ...r, p: [a] }; curT = T; T.roads.push(cur); }
+        cur.p.push(b);
+      }
+    }
+    for (const r of W.rivers) {
+      let cur = null, curT = null;
+      for (let i = 0; i < r.p.length - 1; i++) {
+        const a = r.p[i], b = r.p[i + 1], T = tile((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+        if (T !== curT) { cur = { ...r, p: [a] }; curT = T; (T.rivers = T.rivers || []).push(cur); }
         cur.p.push(b);
       }
     }
@@ -60,6 +84,35 @@ export class Outer {
     this.leafMat = new THREE.MeshStandardMaterial({ map: tex.leaves, color: 0x7d8c66, roughness: 0.95, flatShading: true });
     this.barkMat = new THREE.MeshStandardMaterial({ map: tex.bark, roughness: 1 });
     this.queue = [];
+  }
+  // cauces: cinta de agua siguiendo el fondo del valle
+  riverMesh(list) {
+    const pos = [], idx = [];
+    for (const r of list) {
+      const P = []; for (let i = 0; i < r.p.length - 1; i++) { const a = r.p[i], b = r.p[i + 1], k = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 8)); for (let t = 0; t < k; t++) P.push([a[0] + (b[0] - a[0]) * t / k, a[1] + (b[1] - a[1]) * t / k]); }
+      P.push(r.p[r.p.length - 1]);
+      const hw = r.w / 2;
+      P.forEach((p, i) => {
+        const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)], dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypot(dx, dz) || 1, nx = -dz / L, nz = dx / L;
+        const y = Math.min(this.terrain.ground(p[0] + nx * hw, p[1] + nz * hw), this.terrain.ground(p[0] - nx * hw, p[1] - nz * hw), this.terrain.ground(p[0], p[1])) + 0.25;
+        const o = pos.length / 3; pos.push(p[0] + nx * hw, y, p[1] + nz * hw, p[0] - nx * hw, y, p[1] - nz * hw);
+        if (i) idx.push(o - 2, o, o - 1, o - 1, o, o + 1);
+      });
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+    // la orientación de cada cinta depende del sentido del cauce: normales siempre hacia arriba
+    const nr = g.attributes.normal; for (let i = 0; i < nr.count; i++) nr.setXYZ(i, 0, 1, 0);
+    const m = new THREE.Mesh(g, this.riverMat || (this.riverMat = this.waterMat.clone())); this.riverMat.side = THREE.DoubleSide; return m;
+  }
+  // ¿hay agua aquí? (embalses y lagunas): el coche se frena
+  waterAt(x, z) {
+    for (const w of this.ponds) {
+      if (x < w.x0 || x > w.x1 || z < w.z0 || z > w.z1) continue;
+      let c = false; const p = w.p;
+      for (let i = 0, j = p.length - 1; i < p.length; j = i++) if ((p[i][1] > z) !== (p[j][1] > z) && x < (p[j][0] - p[i][0]) * (z - p[i][1]) / (p[j][1] - p[i][1]) + p[i][0]) c = !c;
+      if (c) return w.y;
+    }
+    return null;
   }
   setWeather(U) { this.U = U; for (const m of this.surfaces) weatherize(m, U); }
   // un material por textura para todas las teselas (menos programas y cambios de estado)
@@ -76,6 +129,7 @@ export class Outer {
   build(T) {
     const g = new THREE.Group();
     if (T.roads.length) g.add(buildRoads({ roads: T.roads, style: 'rural', step: 6, lift: 0.14 }, this.terrain, this.tex, null));
+    if (T.rivers) g.add(this.riverMesh(T.rivers));
     if (T.b.length) g.add(buildBuildings({ buildings: T.b, style: 'rural' }, this.terrain, this.tex, this.colliders));
     if (T.trees.length) {
       const N = T.trees.length, crowns = new THREE.InstancedMesh(this.crown, this.leafMat, N), trunks = new THREE.InstancedMesh(this.trunk, this.barkMat, N);

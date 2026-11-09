@@ -76,10 +76,7 @@ roads, places, rivers = [], [], []
 inside_inner = lambda p: abs(p[0]) < INNER - 5 and abs(p[1]) < INNER - 5
 for w in (e for e in osm if e["type"] == "way"):
     t = w.get("tags", {})
-    if t.get("waterway") in ("river", "stream"):
-        P = simplify(way_pts(w), 3)
-        if len(P) > 1 and t.get("waterway") == "river": rivers.append({"p": P, "w": 8})
-        continue
+    if t.get("waterway"): continue
     hw = t.get("highway")
     if hw not in ROADS or w["id"] in inner_ids or t.get("tunnel") == "yes": continue
     P = way_pts(w)
@@ -93,6 +90,7 @@ for w in (e for e in osm if e["type"] == "way"):
     r = {"k": hw, "w": wd, "s": s, "p": simplify(P, 0.6 if s != "dirt" else 1.5)}
     if hw in ("trunk", "primary", "secondary", "motorway"): r["lines"] = True
     if t.get("name"): r["name"] = t["name"]
+    if t.get("bridge") in ("yes", "viaduct"): r["bridge"] = True
     roads.append(r)
 for e in osm:
     if e["type"] == "node" and e.get("tags", {}).get("place") and e["tags"].get("name"):
@@ -100,6 +98,64 @@ for e in osm:
         if abs(x) < HALF and abs(z) < HALF and math.hypot(x, z) > 600:
             places.append({"name": e["tags"]["name"], "kind": e["tags"]["place"], "c": [x, z]})
 print("vias:", len(roads), "km:", round(sum(sum(math.dist(r["p"][i], r["p"][i + 1]) for i in range(len(r["p"]) - 1)) for r in roads) / 1000), "pueblos:", [p["name"] for p in places])
+
+# ---------------- agua: embalses y lagunas (polígonos) y cauces (cintas) ----------------
+def Hg(x, z):  # altura del relieve lejano (rejilla) en coordenadas del juego
+    fx = min(n - 1.001, max(0, (x - o) / CELL)); fz = min(n - 1.001, max(0, (z - o) / CELL))
+    i, j = int(fx), int(fz); u, v = fx - i, fz - j
+    return float((heights[j, i] * (1 - u) + heights[j, i + 1] * u) * (1 - v) + (heights[j + 1, i] * (1 - u) + heights[j + 1, i + 1] * u) * v)
+water = {"polys": [], "rivers": []}
+wp = os.path.join(DO, "water.json")
+if os.path.exists(wp):
+    wel = json.load(open(wp))["elements"]
+    nodes.update({e["id"]: e for e in wel if e["type"] == "node"})
+    ways = {e["id"]: e for e in wel if e["type"] == "way"}
+    def rings_of(rel, role):
+        segs = [way_pts(ways[m["ref"]]) for m in rel.get("members", []) if m["type"] == "way" and m.get("role", "outer") == role and m["ref"] in ways]
+        segs = [s_ for s_ in segs if len(s_) > 1]; out = []
+        while segs:
+            ring = segs.pop(0)
+            while math.dist(ring[0], ring[-1]) > 0.5:
+                for k, s_ in enumerate(segs):
+                    if math.dist(s_[0], ring[-1]) < 0.5: ring += s_[1:]; break
+                    if math.dist(s_[-1], ring[-1]) < 0.5: ring += s_[::-1][1:]; break
+                else: break
+                segs.pop(k)
+            out.append(ring)
+        return out
+    def add_poly(outer, holes):
+        P = simplify(outer, 1.0)
+        if len(P) < 4 or abs(area(P)) < 150: return
+        # el nivel del agua: lo más bajo de la orilla según el relieve
+        hs = sorted(Hg(*q) for q in densify(P, 20))
+        y = hs[max(0, len(hs) // 10)]
+        water["polys"].append({"p": P[:-1] if P[0] == P[-1] else P, "h": [simplify(hh, 1.0)[:-1] for hh in holes if len(hh) > 3], "y": round(y, 2)})
+    def densify(P, st):
+        out = []
+        for a_, b_ in zip(P, P[1:]):
+            k = max(1, int(math.dist(a_, b_) / st))
+            out += [[a_[0] + (b_[0] - a_[0]) * t / k, a_[1] + (b_[1] - a_[1]) * t / k] for t in range(k)]
+        return out + [P[-1]]
+    in_rel = set()
+    for e in wel:
+        t = e.get("tags", {})
+        if e["type"] == "relation" and (t.get("natural") == "water" or t.get("waterway") == "riverbank" or t.get("landuse") == "reservoir"):
+            for m in e.get("members", []): in_rel.add(m["ref"])
+            for r_ in rings_of(e, "outer"): add_poly(r_, rings_of(e, "inner"))
+    for e in ways.values():
+        t = e.get("tags", {})
+        if e["id"] in in_rel and not t.get("natural"): continue
+        if t.get("natural") == "water" or t.get("waterway") == "riverbank" or t.get("landuse") == "reservoir":
+            P = way_pts(e)
+            if len(P) > 3 and math.dist(P[0], P[-1]) < 1: add_poly(P, [])
+        elif t.get("waterway") in ("river", "stream", "canal") and t.get("tunnel") != "culvert":
+            P = simplify(way_pts(e), 2)
+            if len(P) < 2: continue
+            wd = t.get("width", "")
+            try: wd = float(wd.replace(",", ".").split()[0])
+            except Exception: wd = {"river": 9, "canal": 4, "stream": 2.2}[t["waterway"]]
+            water["rivers"].append({"p": P, "w": round(min(max(wd, 1.5), 40), 1), "k": t["waterway"]})
+print("agua:", len(water["polys"]), "laminas,", len(water["rivers"]), "cauces")
 
 # ---------------- edificios: Catastro de los pueblos + OSM ----------------
 def parse_gml(path):
@@ -163,6 +219,8 @@ dens = box(mask.astype(np.float32), 1)
 blk = Image.new("L", (S, S), 0); dr = ImageDraw.Draw(blk)
 px = lambda q: ((q[0] + HALF) / mpp, (q[1] + HALF) / mpp)
 for b in blds: dr.polygon([px(q) for q in b["p"]], fill=255)
+for wpoly in water["polys"]: dr.polygon([px(q) for q in wpoly["p"]], fill=255)
+for rv in water["rivers"]: dr.line([px(q) for q in rv["p"]], fill=255, width=max(1, int((rv["w"] + 2) / mpp)))
 for r in roads: dr.line([px(q) for q in r["p"]], fill=255, width=max(2, int((r["w"] + 4) / mpp)))
 blk = np.asarray(blk) > 0
 rng = np.random.default_rng(7)
@@ -177,7 +235,7 @@ for j, i in cand:
     if len(trees) >= MAXT: break
 print("encinas:", len(trees))
 
-out = {"half": HALF, "terrain": terrain, "ortho": ortho, "roads": roads, "rivers": rivers, "groups": bgroups, "trees": trees, "places": places}
+out = {"half": HALF, "terrain": terrain, "ortho": ortho, "roads": roads, "water": water, "groups": bgroups, "trees": trees, "places": places}
 json.dump(out, open(os.path.join(OUT, "outer.json"), "w"), separators=(",", ":"))
 for f in ("outer.json", "terrain_outer.json", "ortho_outer.jpg"):
     print(f, os.path.getsize(os.path.join(OUT, f)) // 1024, "KB")

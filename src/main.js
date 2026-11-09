@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { Input } from './input.js';
 import { makeTextures } from './textures.js';
-import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, buildPlaza, Trees, smoothRoads, villageMask, yardWalls } from './world.js';
+import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, buildPlaza, Trees, smoothRoads, villageMask, yardWalls, buildBridges } from './world.js';
 import { Animals } from './animals.js';
 import { Player } from './player.js';
 import { Car } from './car.js';
@@ -71,6 +71,7 @@ async function load(map) {
   const center = data.plaza?.start || data.spawn;
   const ground = buildTerrain(meta, terrain, oFull, oCenter, tex, data.style === 'urban' ? null : villageMask(data, center)); scene.add(ground);
   const colliders = new Colliders();
+  scene.add(buildBridges(data.roads, terrain, tex, colliders)); // antes que las calles: su altura pasa por el tablero
   const buildings = buildBuildings(data, terrain, tex, colliders); scene.add(buildings);
   scene.add(buildPlaza(data, terrain, colliders));
   let bellTower = null; buildings.traverse(o => { if (o.userData.bellTower) bellTower = o.userData.bellTower; });
@@ -298,6 +299,8 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
         if (driving) driving.speed *= -0.3;
         if ((frameNo & 63) === 0) toast('Fin del mapa', 'Hasta aquí llegan los 10 km alrededor de Val de Santa María');
       }
+      // en el agua el coche se hunde y frena
+      if (driving && (frameNo & 3) === 0) { const wy = outer.waterAt(p.x, p.z); if (wy != null && p.y < wy + 0.3) { driving.speed *= 0.7; if (Math.abs(driving.speed) < 0.5 && (frameNo & 127) === 0) toast('¡Al agua!', 'Los coches no flotan: sal marcha atrás'); } }
       if ((frameNo & 31) === 0) { const nm = outer.placeName(target.x, target.z) || data.title; if (placeEl.textContent !== nm) placeEl.textContent = nm; }
     }
     dayNight.update(dt, target);
