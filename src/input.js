@@ -4,7 +4,7 @@ export class Input {
     this.keys = new Set();
     this.move = { x: 0, y: 0 };      // joystick táctil (-1..1)
     this.look = { dx: 0, dy: 0 };    // giro de cámara acumulado
-    this.buttons = { run: false, action: false, brake: false, jump: false };
+    this.buttons = { run: false, action: false, brake: false, jump: false, left: false, right: false, gas: false, rev: false };
     this.pressed = new Set();        // pulsaciones de un solo frame
     this.touch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 
@@ -75,6 +75,7 @@ export class Input {
     let x = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
     let y = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
     x += this.move.x; y += this.move.y;
+    const b = this.buttons; x += (b.right ? 1 : 0) - (b.left ? 1 : 0); y += (b.gas ? 1 : 0) - (b.rev ? 1 : 0);
     return { x: Math.max(-1, Math.min(1, x)), y: Math.max(-1, Math.min(1, y)) };
   }
   get run() { return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.buttons.run || Math.hypot(this.move.x, this.move.y) > 0.95; }

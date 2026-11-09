@@ -53,21 +53,40 @@ class Path {
 
 // Rival: avanza por el recorrido a su ritmo (cinemático)
 class RaceDriver {
-  constructor(car, path, lane, pace, s0) { Object.assign(this, { car, path, lane, pace, s: s0, go: false, done: false }); car.speed = 0; this.place(); }
+  constructor(car, path, lane, pace, s0) {
+    Object.assign(this, { car, path, lane, pace, s: s0, go: false, done: false, stun: 0, slip: 0, slipDir: 1 });
+    this.baseLane = lane; this.nextMistake = 6 + Math.random() * 10; this.nextLane = 3 + Math.random() * 4;
+    car.speed = 0; this.place();
+  }
   place() {
     const p = this.path.at(this.s, this.lane), q = this.path.at(this.s + 3, this.lane);
     this.car.pos.x = p.x; this.car.pos.z = p.z; this.car.heading = Math.atan2(q.x - p.x, q.z - p.z);
   }
+  // le han dado un golpe: pierde velocidad y tarda en recuperarse
+  bump(rel) { this.car.speed *= 0.35; this.stun = Math.max(this.stun, 0.8 + Math.min(1.5, rel * 0.1)); this.slip = Math.max(this.slip, 0.6); this.slipDir = Math.random() < 0.5 ? -1 : 1; }
   update(dt) {
     const c = this.car;
-    const target = !this.go || this.done || c.wrecked ? 0 : this.pace * (1 - Math.min(0.6, this.path.turn(this.s, 10 + c.speed) * 0.55));
-    c.speed += THREE.MathUtils.clamp(target - c.speed, -8 * dt, 4 * dt);
+    if (this.go && !this.done) {
+      // errores: a veces se va largo en una curva o se distrae
+      this.nextMistake -= dt;
+      if (this.nextMistake <= 0) { this.nextMistake = 8 + Math.random() * 14; this.slip = 1.2 + Math.random(); this.slipDir = Math.random() < 0.5 ? -1 : 1; }
+      this.nextLane -= dt;
+      if (this.nextLane <= 0) { this.nextLane = 3 + Math.random() * 5; this.baseLane = (Math.random() * 2 - 1) * 1.1; }
+    }
+    this.stun = Math.max(0, this.stun - dt); this.slip = Math.max(0, this.slip - dt);
+    const health = 0.55 + 0.45 * c.health / 100;
+    let target = !this.go || this.done || c.wrecked ? 0 : this.pace * health * (1 - Math.min(0.6, this.path.turn(this.s, 10 + c.speed) * 0.55));
+    if (this.stun > 0) target *= 0.3;
+    if (this.slip > 0) target *= 0.55;
+    c.speed += THREE.MathUtils.clamp(target - c.speed, -8 * dt, 3.6 * dt);
     this.s += c.speed * dt;
+    // carril: cambia de vez en cuando y, al equivocarse, se abre hacia fuera
+    const laneT = this.baseLane + (this.slip > 0 ? this.slipDir * 1.4 : 0);
+    this.lane += (laneT - this.lane) * Math.min(1, dt * 1.5);
     const p = this.path.at(this.s, this.lane), q = this.path.at(this.s + 2 + c.speed * 0.3, this.lane);
-    // sigue la trazada con suavidad (y vuelve a ella si el jugador le ha empujado)
-    c.pos.x += (p.x - c.pos.x) * Math.min(1, dt * 6); c.pos.z += (p.z - c.pos.z) * Math.min(1, dt * 6);
+    c.pos.x += (p.x - c.pos.x) * Math.min(1, dt * 4); c.pos.z += (p.z - c.pos.z) * Math.min(1, dt * 4);
     let e = Math.atan2(q.x - c.pos.x, q.z - c.pos.z) - c.heading; e = Math.atan2(Math.sin(e), Math.cos(e));
-    c.heading += e * Math.min(1, dt * 8); c.steer = THREE.MathUtils.clamp(-e * 2, -0.6, 0.6);
+    c.heading += e * Math.min(1, dt * 6); c.steer = THREE.MathUtils.clamp(-e * 2, -0.6, 0.6);
     if (this.s >= this.path.length - 1) this.done = true;
   }
 }
@@ -91,7 +110,7 @@ export class Race {
     const place = (c, s, lane) => { const p = this.path.at(s, lane), q = this.path.at(s + 3, lane); c.pos.x = p.x; c.pos.z = p.z; c.heading = Math.atan2(q.x - p.x, q.z - p.z); c.speed = 0; };
     place(car, 14, lanes[1]);
     const cols = [0xf2c200, 0x1b7f3a, 0xe8e8e8];
-    this.rivals = [[14, lanes[0], 15.5], [6, lanes[1], 16.5], [6, lanes[0], 14.5]].map(([s, lane, pace], k) => {
+    this.rivals = [[14, lanes[0], 12.5], [6, lanes[1], 13.5], [6, lanes[0], 11.5]].map(([s, lane, pace], k) => {
       const c = this.makeCar(cols[k]); c.ai = new RaceDriver(c, this.path, lane, pace, s); c.racer = true; return c;
     });
     this.onStart?.(car);
@@ -119,6 +138,15 @@ export class Race {
       return;
     }
     this.time += dt;
+    // los rivales también se tocan entre ellos
+    for (let i = 0; i < this.rivals.length; i++) for (let j = i + 1; j < this.rivals.length; j++) {
+      const A = this.rivals[i], B = this.rivals[j], d = Math.hypot(A.pos.x - B.pos.x, A.pos.z - B.pos.z);
+      if (d < 2.1 * A.s && !A.ai.done && !B.ai.done) {
+        const rel = Math.abs(A.speed - B.speed) + 2;
+        const back = A.ai.s < B.ai.s ? A : B, front = back === A ? B : A; back.ai.bump(rel); back.ai.baseLane = front.ai.lane > 0 ? -1 : 1; back.ai.nextLane = 4; (back === A ? B : A).ai.slip = Math.max((back === A ? B : A).ai.slip, 0.4);
+        A.damage(rel, 0, A.ai.s < B.ai.s ? 1.8 : -1.8); B.damage(rel, 0, A.ai.s < B.ai.s ? -1.8 : 1.8);
+      }
+    }
     if (driving !== this.car) return this.end('Has abandonado la carrera', 'Bájate del coche y pierdes', false);
     if (Math.hypot(pos.x - this.cp.position.x, pos.z - this.cp.position.z) < 9) {
       this.next++; this.sound?.('ok');

@@ -114,14 +114,14 @@ export class Car {
 
     if (this.speed !== 0 || !this.settled) {
       // colisiones con edificios, muros y otros coches
-      let bumped = false, hitAt = null;
+      let wallN = null, hitAt = null, carHit = null;
       const f2x = Math.sin(this.heading), f2z = Math.cos(this.heading), v0 = Math.abs(this.speed);
       for (const o0 of [-1.4, 0, 1.4]) {
         const o = o0 * this.s, p = { x: this.pos.x + f2x * o, z: this.pos.z + f2z * o };
         const hit = colliders.resolve(p, 0.95 * this.s);
         if (hit) {
-          this.pos.x = p.x - f2x * o; this.pos.z = p.z - f2z * o; bumped = true;
-          // punto de impacto en coordenadas locales del coche (la normal apunta desde la pared hacia el coche)
+          this.pos.x = p.x - f2x * o; this.pos.z = p.z - f2z * o;
+          wallN = wallN || hit; // la normal apunta desde la pared hacia el coche
           hitAt = hitAt || localHit(this, p.x - hit.x * 0.95 * this.s, p.z - hit.z * 0.95 * this.s);
         }
       }
@@ -131,11 +131,27 @@ export class Car {
           const dx = cx - ox, dz = cz - oz, d = Math.hypot(dx, dz);
           const D = 0.95 * (this.s + c.s); if (d < D && d > 1e-6) {
             const rel = Math.abs(this.speed - c.speed * (f2x * Math.sin(c.heading) + f2z * Math.cos(c.heading)));
-            if (rel > 3 && !bumped) { const dmg = (rel - 3) * 1.6; this.damage(dmg, ...localHit(this, ox, oz)); c.damage(dmg, ...localHit(c, cx, cz)); if (c.ai) c.ai.wait = -3; }
-            const push = (D - d) / 2; this.pos.x += dx / d * push; this.pos.z += dz / d * push; c.pos.x -= dx / d * push; c.pos.z -= dz / d * push; c.speed += this.speed * 0.1; bumped = true; }
+            if (rel > 3 && !carHit) { const dmg = (rel - 3) * 1.6; this.damage(dmg, ...localHit(this, ox, oz)); c.damage(dmg, ...localHit(c, cx, cz)); }
+            if (!carHit) { if (c.ai?.bump) c.ai.bump(rel); else if (c.ai) c.ai.wait = -3; }
+            const push = (D - d) / 2; this.pos.x += dx / d * push; this.pos.z += dz / d * push; c.pos.x -= dx / d * push; c.pos.z -= dz / d * push;
+            if (!c.ai) c.speed += this.speed * 0.1;
+            carHit = carHit || c;
+          }
         }
       }
-      if (bumped && Math.abs(this.speed) > 1) this.speed *= -0.25;
+      if (wallN && Math.abs(this.speed) > 1) {
+        // contra una pared: el coche se desvía y resbala a lo largo de ella en vez de pararse en seco
+        const dir = Math.sign(this.speed), fx = f2x * dir, fz = f2z * dir, dot = fx * wallN.x + fz * wallN.z;
+        if (dot < 0) {
+          let tx = fx - wallN.x * dot, tz = fz - wallN.z * dot, tl = Math.hypot(tx, tz);
+          if (tl < 0.25) { const side = (fx * wallN.z - fz * wallN.x) >= 0 ? 1 : -1; tx = wallN.z * side; tz = -wallN.x * side; tl = 1; } // de frente: hacia un lado
+          tx = tx / tl + wallN.x * 0.35; tz = tz / tl + wallN.z * 0.35; // y un poco hacia fuera
+          const h = Math.atan2(tx * dir, tz * dir); let dh = h - this.heading; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+          this.heading += dh * 0.6;
+          this.speed *= 0.55 + 0.4 * (1 - Math.abs(dot)); // de refilón casi no frena; de frente pierde la mitad
+          this.pos.x += wallN.x * 0.05; this.pos.z += wallN.z * 0.05;
+        }
+      } else if (carHit && Math.abs(this.speed) > 1) this.speed *= carHit.ai ? 0.8 : 0.6;
       this.#orient(dt);
       this.settled = true;
     }

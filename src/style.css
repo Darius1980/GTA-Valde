@@ -62,3 +62,28 @@ body.touch #mission { top: auto; bottom: calc(max(28px, env(safe-area-inset-bott
 #fs { position: fixed; z-index: 5; left: 50%; transform: translateX(-50%); bottom: max(10px, env(safe-area-inset-bottom)); width: 44px; height: 44px; border-radius: 50%;
   border: 2px solid rgba(255,255,255,.5); background: rgba(0,0,0,.4); color: #fff; font-size: 22px; line-height: 1; cursor: pointer; }
 #fs[hidden] { display: none; }
+
+/* controles de coche táctiles al estilo de los juegos de móvil */
+#steer, #pedals { display: none; position: fixed; bottom: max(24px, env(safe-area-inset-bottom)); z-index: 4; gap: 16px; }
+#steer { left: max(20px, env(safe-area-inset-left)); }
+#pedals { right: max(20px, env(safe-area-inset-right)); align-items: flex-end; }
+.btn.big { width: 78px; height: 78px; font-size: 30px; border-radius: 18px; }
+.btn.gas { height: 104px; background: rgba(40,140,60,.45); }
+body.touch.driving #steer, body.touch.driving #pedals { display: flex; }
+body.touch.driving #stick, body.touch.driving [data-btn="jump"], body.touch.driving [data-btn="run"] { display: none; }
+body.touch.driving #btns { bottom: max(24px, env(safe-area-inset-bottom)); right: calc(max(20px, env(safe-area-inset-right)) + 190px); grid-template-columns: 64px; }
+
+/* textos en el lateral izquierdo, lejos del centro de la pantalla */
+#mission { top: max(12px, env(safe-area-inset-top)); left: 16px; transform: none; max-width: min(46vw, 420px); white-space: normal; text-align: left; }
+#toast { top: 64px; left: 16px; transform: translate(-10px, 0); text-align: left; max-width: min(42vw, 380px); width: auto; padding: 8px 12px; background: rgba(0,0,0,.45); border-radius: 10px; }
+#toast.show { transform: translate(0, 0); }
+#toast b { font-size: clamp(18px, 3.2vw, 26px); }
+#toast span { font-size: 13px; }
+#help { top: auto; bottom: 186px; max-width: min(46vw, 420px); font-size: 12px; }
+body.touch #mission { top: calc(max(12px, env(safe-area-inset-top)) + 26px); bottom: auto; font-size: 12px; }
+body.touch #toast { top: calc(max(12px, env(safe-area-inset-top)) + 62px); }
+body.touch #help { bottom: auto; top: calc(max(12px, env(safe-area-inset-top)) + 110px); max-width: 52vw; }
+#fs { left: auto; right: 16px; transform: none; bottom: auto; top: 50%; }
+body.touch #fs { top: auto; bottom: calc(max(28px, env(safe-area-inset-bottom)) + 240px); }
+body.touch #help { font-size: 11px; max-width: 44vw; padding: 8px 10px; line-height: 1.4; }
+body.touch #fs { top: auto; right: auto; left: 50%; transform: translateX(-50%); bottom: max(12px, env(safe-area-inset-bottom)); }
