@@ -130,15 +130,18 @@ export class Plane {
       this.roll *= 0.8;
       // fuera del asfalto el campo frena y traquetea
       if (!onAirfield(this.f, this.pos.x, this.pos.z, 2) && this.speed > 6) this.speed -= 4 * dt;
-      if (this.speed > VR && a.y > 0) { this.onGround = false; this.vy = 1.5; toast?.('✈ ¡Despegando!', 'Arriba/abajo sube o baja el morro, izquierda/derecha gira. Espacio quita gas.'); }
+      if (this.speed > VR && a.y > 0) { this.onGround = false; this.vy = 3; this.throttle = 1; this.airT = 0; toast?.('✈ ¡Despegando!', input?.touch ? 'Joystick: morro y giro · ▼ quita gas, ▲ lo da' : 'W/S: morro · A/D: giro · Espacio quita gas, W lo da'); }
       this.pos.x += Math.sin(this.heading) * this.speed * dt; this.pos.z += Math.cos(this.heading) * this.speed * dt;
       this.pos.y = T.height(this.pos.x, this.pos.z) + GEAR; this.vy = this.onGround ? 0 : this.vy;
       const hit = this.speed > 4 && this.world.colliders.nearest(this.pos.x, this.pos.z, 3 * this.s);
       if (hit) return this.#crash(toast, 'Te has chocado rodando por tierra');
     } else {
-      this.throttle += ((brake ? 0.15 : 1) - this.throttle) * Math.min(1, dt * 1.2);
+      // gas: espacio o el pedal ▼ lo quitan (poco a poco mientras se mantienen), el pedal ▲ o W lo dan
+      const bt = input?.buttons || {}, cut = brake || bt.rev, more = bt.gas || input?.keys?.has('KeyW') || input?.keys?.has('ArrowUp');
+      if (cut) this.throttle = Math.max(0, this.throttle - dt * 0.6); else if (more || this.throttle > 0.999) this.throttle = Math.min(1, this.throttle + dt * 0.5);
+      const py = THREE.MathUtils.clamp(a.y - (bt.gas ? 1 : 0) + (bt.rev ? 1 : 0), -1, 1); // los pedales no mueven el morro
       const stall = this.speed < STALL;
-      const tp = stall ? -0.35 : THREE.MathUtils.clamp(a.y * 0.38, -0.45, 0.4);
+      const tp = stall ? -0.35 : THREE.MathUtils.clamp(py * 0.38, -0.45, 0.4);
       this.pitch += (tp - this.pitch) * Math.min(1, dt * 1.6);
       this.roll += (a.x * 0.65 - this.roll) * Math.min(1, dt * 2);
       this.heading -= Math.tan(this.roll) * 9.8 / Math.max(15, this.speed) * dt * 1.4;
@@ -147,6 +150,11 @@ export class Plane {
       const lift = Math.min(1, this.speed / 30);
       const vyT = Math.sin(this.pitch) * this.speed - (1 - lift) * 6;
       this.vy += (vyT - this.vy) * Math.min(1, dt * 2.5);
+      // cerca del suelo la avioneta se posa sola (efecto suelo): baja como mucho a 2,5 m/s si no va lanzada
+      const agl = this.pos.y - T.height(this.pos.x, this.pos.z);
+      if (agl < 10 && this.vy < -2.5) this.vy += (-2.5 - this.vy) * Math.min(1, dt * 4);
+      // más resistencia con poco gas (flaps): así frena de verdad para aterrizar
+      if (this.throttle < 0.5) this.speed -= (0.5 - this.throttle) * 0.004 * this.speed * this.speed * dt;
       const fh = Math.cos(this.pitch) * this.speed;
       this.pos.x += Math.sin(this.heading) * fh * dt; this.pos.z += Math.cos(this.heading) * fh * dt; this.pos.y += this.vy * dt;
       const gy = T.height(this.pos.x, this.pos.z);
@@ -160,9 +168,11 @@ export class Plane {
         if (!this.edgeWarn) { this.edgeWarn = true; toast?.('Fin del mapa', 'La avioneta da la vuelta hacia Val de Santa María'); }
       } else this.edgeWarn = false;
       if (this.pos.y - gy < 12 && this.world.colliders.nearest(this.pos.x, this.pos.z, 3, 'building')) return this.#crash(toast, 'Has chocado contra una casa');
-      if (this.pos.y <= gy + GEAR) {
-        const soft = this.vy > -4.5 && Math.abs(this.roll) < 0.3 && this.pitch > -0.15 && this.speed < 45;
-        if (!soft) return this.#crash(toast, this.speed >= 45 ? 'Demasiado rápido: aterriza por debajo de 160 km/h' : 'Has bajado muy de golpe');
+      this.airT = (this.airT || 0) + dt;
+      if (this.pos.y <= gy + GEAR && this.airT < 3) { this.pos.y = gy + GEAR; this.vy = Math.max(this.vy, 1); } // recién despegada: no rebota
+      else if (this.pos.y <= gy + GEAR) {
+        const soft = this.vy > -6 && Math.abs(this.roll) < 0.4 && this.pitch > -0.3;
+        if (!soft) return this.#crash(toast, 'Has bajado muy de golpe: quita gas y baja el morro poco a poco');
         this.onGround = true; this.pos.y = gy + GEAR; this.vy = 0; this.roll = 0; this.pitch = 0; this.throttle = 0;
         toast?.('🛬 Aterrizaje', onAirfield(this.f, this.pos.x, this.pos.z) ? '¡Bien hecho! Frena con abajo o espacio' : 'En pleno campo… frena con abajo o espacio');
       }
