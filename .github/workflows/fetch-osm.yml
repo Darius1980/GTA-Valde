@@ -1,7 +1,7 @@
 name: Fetch map data
 on:
   push:
-    paths: [tools/fetch_data.py, tools/maps.json, .github/workflows/fetch-osm.yml]
+    paths: [tools/fetch_data.py, tools/fetch_outer.py, tools/maps.json, .github/workflows/fetch-osm.yml]
   workflow_dispatch:
     inputs:
       map: { description: "Mapa (tools/maps.json)", required: true, default: beraun }
@@ -10,6 +10,7 @@ permissions:
 jobs:
   fetch:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - run: pip install pyproj
@@ -17,6 +18,8 @@ jobs:
       - run: |
           for m in ${{ github.event.inputs.map || '$(python3 -c "import json;print(\" \".join(json.load(open(\"tools/maps.json\"))))")' }}; do
             if [ -n "${{ github.event.inputs.map }}" ] || [ ! -f "data/$m/osm.json" ]; then python tools/fetch_data.py "$m"; fi
+            # entorno lejano (radio de 10 km) para los mapas que lo piden
+            if python3 -c "import json,sys;sys.exit(0 if 'outer_half' in json.load(open('tools/maps.json'))['$m'] else 1)" && [ ! -f "data/$m/outer/osm.json" ]; then python tools/fetch_outer.py "$m"; fi
           done
       - run: |
           git config user.name "github-actions[bot]"
