@@ -95,6 +95,27 @@ for i in range(2):
             except Exception as e:
                 print("pnoa fail", i, j, e, flush=True); time.sleep(10)
 
+# --- Ortofoto de detalle (0,8 m/px) de 1,6 km alrededor de cada pueblo, para verlo bien de cerca
+try:
+    _osm = json.load(open(os.path.join(OUT, "osm.json")))["elements"]
+except Exception:
+    _osm = []
+vill = []
+for e in _osm:
+    if e["type"] == "node" and e.get("tags", {}).get("place") in ("village", "town", "hamlet"):
+        e_, n_ = to_utm.transform(e["lon"], e["lat"])
+        if abs(e_ - cx) < HALF and abs(n_ - cy) < HALF and math.hypot(e_ - cx, n_ - cy) > 1200: vill.append((e["id"], e_, n_))
+for vid, e_, n_ in vill:
+    f = f"ortho_v_{vid}.jpg"
+    if have(f): continue
+    url = "https://www.ign.es/wms-inspire/pnoa-ma?" + urllib.parse.urlencode({
+        "SERVICE": "WMS", "VERSION": "1.3.0", "REQUEST": "GetMap", "LAYERS": "OI.OrthoimageCoverage",
+        "STYLES": "", "CRS": "EPSG:25830", "BBOX": f"{e_ - 800},{n_ - 800},{e_ + 800},{n_ + 800}",
+        "WIDTH": 2048, "HEIGHT": 2048, "FORMAT": "image/jpeg"})
+    for k in range(3):
+        try: save(f, get(url)); break
+        except Exception as ex: print("pnoa village fail", vid, ex, flush=True); time.sleep(10)
+
 # --- Catastro en torno a cada pueblo
 if CFG.get("catastro") and not glob.glob(os.path.join(OUT, "cbp_*.gml")):
     try:
