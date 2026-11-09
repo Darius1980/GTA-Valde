@@ -190,6 +190,8 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   const ambient = new Ambient(engine);
   const plaza = new Plaza({ scene, world, data, center, isMobile, ambient });
   const interiors = new Interiors({ scene, world, data, center, tex, bellTower });
+  const offerEl = document.getElementById('offer'), offerUI = { id: null, declined: false, accept: false, reject: false, txt: null }; let curOffer = null;
+  for (const [sel, k] of [['.yes', 'accept'], ['.no', 'reject']]) { const b = offerEl.querySelector(sel); const f = (e) => { e.preventDefault(); e.stopPropagation(); offerUI[k] = true; }; b.addEventListener('click', f); b.addEventListener('touchstart', f, { passive: false }); }
   const fade = document.getElementById('fade'), wxEl = document.getElementById('wx'), minimapEl = document.getElementById('minimap');
   wxEl.addEventListener('click', () => weather.next()); wxEl.addEventListener('touchstart', e => { weather.next(); e.stopPropagation(); }, { passive: true });
   wxEl.textContent = weather.info.icon;
@@ -225,7 +227,11 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     camState.yaw -= look.dx * 0.0035; camState.pitch = THREE.MathUtils.clamp(camState.pitch + look.dy * 0.0025, -0.25, 1.2);
 
     // subir/bajar del coche
-    if (input.wasPressed('KeyE', 'KeyF', 'Enter', 'btn:action')) {
+    // tareas: al llegar a un círculo se ofrece y hay que aceptarla (E / Intro / botón Sí) o rechazarla (N / Esc / No)
+    const pressE = input.wasPressed('KeyE', 'KeyF', 'Enter', 'btn:action');
+    if (curOffer && (offerUI.accept || pressE && !offerUI.declined)) { const o = curOffer; offerUI.declined = true; o.go(); }
+    else if (curOffer && (offerUI.reject || input.wasPressed('KeyN', 'Escape'))) offerUI.declined = true;
+    else if (pressE) {
       if (driving) {
         if (driving.mesh.userData.rider) driving.mesh.userData.rider.visible = false;
         driving.driver = false; player.exitCar(driving); driving = null; scene.add(headlight);
@@ -243,6 +249,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
         }
       }
     }
+    offerUI.accept = offerUI.reject = false;
     if (input.wasPressed('KeyY')) weather.next();
     if (input.wasPressed('KeyT')) dayNight.skip(1);
     if (driving && input.wasPressed('KeyQ', 'btn:gear')) driving.gear = driving.gear === 1 ? 2 : 1;
@@ -330,6 +337,11 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     sun.position.copy(target).addScaledVector(dayNight.light, 200); sun.target.position.copy(target);
 
     engine.update(!!driving, driving ? driving.speed : 0, driving ? input.axes().y : 0, driving ? driving.gear : 1);
+    const offer = race.offer || jobs.offer || missions.offer || shops.offer || null;
+    if ((offer?.id || null) !== offerUI.id) { offerUI.id = offer?.id || null; offerUI.declined = false; }
+    curOffer = offer && !offerUI.declined ? offer : null;
+    const oTxt = curOffer ? curOffer.text : '';
+    if (offerUI.txt !== oTxt) { offerUI.txt = oTxt; offerEl.classList.toggle('on', !!curOffer); offerEl.querySelector('span').textContent = oTxt; }
     if ((frameNo++ & 1) === 0) minimap.draw(target.x, target.z, driving ? driving.heading : player.heading, camState.yaw, cars, driving, { walkers, flags: [...race.starts, ...jobs.flags, ...shops.flags, ...interiors.flags], target: race.target || jobs.target || missions.target, targetColor: race.target ? '#3aa0e2' : jobs.active || missions.state === 'deliver' ? '#47d16c' : '#f5c542' });
     camera.fov += ((driving ? 60 + Math.min(15, Math.abs(driving.speed) * 0.5) : 60) - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix();
     if (driving && gearBtn.dataset.g !== String(driving.gear)) { gearBtn.dataset.g = driving.gear; gearBtn.textContent = driving.gear === 1 ? 'C' : 'L'; }

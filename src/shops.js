@@ -128,7 +128,7 @@ export class Shops {
     return false;
   }
   update(dt, driving, player) {
-    const t = performance.now() / 1000; let hint = '';
+    const t = performance.now() / 1000; let hint = ''; this.offer = null;
     for (const p of this.places) if (p.marker) { p.marker.userData.col.material.opacity = 0.22 + 0.1 * Math.sin(t * 3); }
     const pos = driving ? driving.pos : player.pos;
     for (const c of this.forSale) if (c.forSale && !driving && c.pos.distanceTo(player.pos) < 3.2 * c.s + 1.5) hint = `Comprar ${SPEC[c.forSale.kind].name.toLowerCase()} por ${c.forSale.price} € (E / 🚪)`;
@@ -136,21 +136,21 @@ export class Shops {
     for (const p of this.places) {
       if (!p.marker) continue;
       const d = Math.hypot(pos.x - p.x, pos.z - p.z);
-      if (d > 5) { if (p.done && d > 12) p.done = false; continue; }
+      if (d > 5) continue;
       if (!driving) { hint = p.kind === 'gas' ? 'Ven en coche para repostar' : 'Trae aquí el coche para arreglarlo'; continue; }
-      if (p.done) continue;
       if (Math.abs(driving.speed) > 1.5) { hint = 'Para aquí'; continue; }
-      p.done = true;
       if (p.kind === 'gas') {
-        if (driving.fuel > 0.97) { this.toast('⛽ Gasolinera', 'El depósito ya está lleno'); continue; }
+        if (driving.fuel > 0.97) { hint = '⛽ El depósito ya está lleno'; continue; }
         const cost = Math.max(1, Math.ceil((1 - driving.fuel) * 35));
-        if (this.wallet.money < cost) { this.toast('⛽ No te llega', `Llenar cuesta ${cost} €`); this.sound?.('fail'); continue; }
-        this.wallet.money -= cost; driving.fuel = 1; this.toast('⛽ Depósito lleno', `-${cost} €`); this.sound?.('ok');
+        this.offer = { id: 'shop:gas', text: `⛽ Llenar el depósito por ${cost} €`, go: () => {
+          if (this.wallet.money < cost) { this.toast('⛽ No te llega', `Llenar cuesta ${cost} €`); this.sound?.('fail'); return; }
+          this.wallet.money -= cost; driving.fuel = 1; this.toast('⛽ Depósito lleno', `-${cost} €`); this.sound?.('ok'); } };
       } else {
-        if (driving.health > 99) { this.toast('🔧 Taller', 'Tu coche está perfecto'); continue; }
+        if (driving.health > 99) { hint = '🔧 Tu coche está perfecto'; continue; }
         const cost = Math.max(5, Math.ceil((100 - driving.health) * 0.9));
-        if (this.wallet.money < cost) { this.toast('🔧 No te llega', `Arreglarlo cuesta ${cost} €`); this.sound?.('fail'); continue; }
-        this.wallet.money -= cost; driving.repair(); this.onRepair?.(driving); this.toast('🔧 Como nuevo', `Carrocería y motor arreglados: -${cost} €`); this.sound?.('ok');
+        this.offer = { id: 'shop:taller', text: `🔧 Arreglar el coche por ${cost} €`, go: () => {
+          if (this.wallet.money < cost) { this.toast('🔧 No te llega', `Arreglarlo cuesta ${cost} €`); this.sound?.('fail'); return; }
+          this.wallet.money -= cost; driving.repair(); this.onRepair?.(driving); this.toast('🔧 Como nuevo', `Carrocería y motor arreglados: -${cost} €`); this.sound?.('ok'); } };
       }
     }
     return hint;

@@ -33,7 +33,7 @@ export class Jobs {
     if (this.post) this.defs.push({ id: 'correo', icon: '✉️', name: 'El correo', at: this.post, color: 0xf0a020, needsCar: false });
     this.defs.push({ id: 'taxi', icon: '🚕', name: 'Taxi', at: null, color: 0x2ed1ff, needsCar: true });
     for (const d of this.defs) { d.marker = beam(d.color); d.marker.scale.set(1, 0.55, 1); scene.add(d.marker); if (d.at) this.place(d.marker, d.at); }
-    this.dropM = beam(0x47d16c); scene.add(this.dropM);
+    this.dropM = beam(0x47d16c, true); scene.add(this.dropM);
     // el vecino que pide el taxi
     this.fare = makeCharacter({ shirt: 0x8a3a6a, pants: 0x30343a, hair: 0x9a9a9a }); this.fare.scale.setScalar(personScale); this.fare.visible = false; scene.add(this.fare);
     this.state = 'idle'; this.cool = 0; this.taxiT = 3; this.job = null;
@@ -77,7 +77,7 @@ export class Jobs {
     const t = performance.now() / 1000;
     for (const m of [...this.defs.map(d => d.marker), this.dropM]) if (m.visible) { m.userData.col.material.opacity = 0.22 + 0.1 * Math.sin(t * 3); }
     if (this.cool > 0) this.cool -= dt;
-    const busy = this.busy?.(); this.hint = '';
+    const busy = this.busy?.(); this.hint = ''; this.offer = null;
     if (this.state === 'idle') {
       const taxi = this.defs.find(d => d.id === 'taxi');
       if (!taxi.at) { this.taxiT -= dt; if (this.taxiT <= 0) this.newFare(pos); }
@@ -87,7 +87,7 @@ export class Jobs {
         if (!d.marker.visible) continue;
         const near = Math.hypot(pos.x - d.at[0], pos.z - d.at[1]) < 3.5;
         if (near && d.needsCar && !driving) { this.hint = `${d.icon} ${d.name}: necesitas un vehículo`; continue; }
-        if (near && (!driving || Math.abs(driving.speed) < 3)) { this.begin(d, pos); break; }
+        if (near && (!driving || Math.abs(driving.speed) < 3)) { const at = { x: pos.x, z: pos.z }; this.offer = { id: `job:${d.id}`, text: `${d.icon} ${d.name}`, go: () => this.begin(d, at) }; break; }
       }
       return;
     }

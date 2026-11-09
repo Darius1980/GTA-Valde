@@ -1,11 +1,11 @@
 // Misiones de reparto: recoge el pan en la plaza y llévalo a las casas antes de que se acabe el tiempo.
 import * as THREE from 'three';
 
-export function beam(color) {
-  const g = new THREE.Group();
+export function beam(color, tall = false) {
+  const g = new THREE.Group(), H = tall ? 30 : 14;
   const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide, fog: false, blending: THREE.AdditiveBlending });
-  const col = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 40, 24, 1, true), mat); col.position.y = 20; g.add(col);
-  const ring = new THREE.Mesh(new THREE.RingGeometry(1.1, 1.6, 32), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+  const col = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, H, 20, 1, true), mat); col.position.y = H / 2; g.add(col);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.6, 0.9, 28), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
   ring.rotation.x = -Math.PI / 2; ring.position.y = 0.15; g.add(ring);
   g.userData = { col, ring }; g.visible = false;
   return g;
@@ -14,7 +14,7 @@ export function beam(color) {
 export class Missions {
   constructor({ scene, terrain, start, drops, ui, sound }) {
     Object.assign(this, { scene, terrain, start, drops, ui, sound });
-    this.startMarker = beam(0xf5c542); this.dropMarker = beam(0x47d16c);
+    this.startMarker = beam(0xf5c542); this.dropMarker = beam(0x47d16c, true);
     scene.add(this.startMarker, this.dropMarker);
     this.state = 'idle'; this.cool = 0; this.money = 0;
     try { this.best = +localStorage.getItem('valde.best') || 0; } catch (_) { this.best = 0; }
@@ -47,8 +47,9 @@ export class Missions {
     if (this.state === 'idle') this.startMarker.visible = this.cool <= 0 && !this.busy?.();
     const near = (m) => m.visible && Math.hypot(pos.x - m.userData.at[0], pos.z - m.userData.at[1]) < 3.2;
     this.startMarker.visible = this.startMarker.visible && !this.busy?.();
-    if (this.state === 'idle' && this.cool <= 0 && !this.busy?.() && near(this.startMarker)) this.begin([pos.x, pos.z]);
-    else if (this.state === 'deliver') {
+    // no empieza solo: ofrece la tarea y el jugador dice sí o no
+    this.offer = this.state === 'idle' && this.cool <= 0 && !this.busy?.() && near(this.startMarker) ? { id: 'pan', text: '🥖 Repartir el pan por el pueblo', go: (at => () => this.begin(at))([pos.x, pos.z]) } : null;
+    if (this.state === 'deliver') {
       this.time -= dt;
       if (near(this.dropMarker)) {
         const pay = 10 + Math.max(0, Math.round(this.time));

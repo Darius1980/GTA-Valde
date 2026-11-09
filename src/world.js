@@ -625,29 +625,40 @@ function sideNormal(P, i) {
 }
 
 // ---------- muros de piedra seca ----------
-// tapias de piedra de huertos y corrales: donde la calle del pueblo no tiene fachada al lado,
-// un muro bajo a 0,6 m del borde, en tramos con huecos para pasar (no vienen en el Catastro)
+// tapias de piedra de huertos y corrales y ruinas de casas caídas: donde la calle del pueblo no tiene
+// fachada al lado, un muro continuo a 0,6 m del borde que cierra el paso (en Valde no hay huecos abiertos
+// a la calle; lo dijo Darío). No vienen en el Catastro.
 export function yardWalls(data, colliders, avoid = []) {
   const [cx, cz] = data.plaza?.start || data.spawn, out = [];
   const pave = data.roads.filter(r => r.k !== 'path');
   const grid = new Map(), C = 8, key = (x, z) => `${Math.floor(x / C)},${Math.floor(z / C)}`;
-  for (const r of pave) { const P = densify(r.p, 1.5); for (const p of P) { const k = key(p[0], p[1]); if (!grid.has(k)) grid.set(k, []); grid.get(k).push([p[0], p[1], r.w / 2]); } }
-  const onRoad = (x, z) => { const i = Math.floor(x / C), j = Math.floor(z / C); for (let a = i - 1; a <= i + 1; a++) for (let b = j - 1; b <= j + 1; b++) for (const [px, pz, hw] of grid.get(`${a},${b}`) || []) if (Math.hypot(px - x, pz - z) < hw + 1.2) return true; return false; };
+  for (const r of pave) { const P = densify(r.p, 1.5); for (const p of P) { const k = key(p[0], p[1]); if (!grid.has(k)) grid.set(k, []); grid.get(k).push([p[0], p[1], r.w / 2, r]); } }
+  // ¿cae encima de otra calle? (la propia no cuenta: el muro va pegado a ella)
+  const onRoad = (x, z, own) => { const i = Math.floor(x / C), j = Math.floor(z / C); for (let a = i - 1; a <= i + 1; a++) for (let b = j - 1; b <= j + 1; b++) for (const [px, pz, hw, rr] of grid.get(`${a},${b}`) || []) if (Math.hypot(px - x, pz - z) < hw + (rr === own ? 0.3 : 1.0)) return true; return false; };
   let seed = 11; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const STREETS = new Set(['residential', 'living_street', 'tertiary', 'unclassified', 'secondary']);
   for (const r of data.roads) {
-    if (r.k !== 'residential' && r.k !== 'living_street') continue;
+    if (!STREETS.has(r.k)) continue;
     const P = densify(r.p, 2);
     for (const side of [1, -1]) {
-      let run = [], maxLen = 8 + rnd() * 10;
-      const flush = () => { if (run.length >= 3) out.push({ p: run, h: 1.0 + rnd() * 0.5 }); run = []; maxLen = 6 + rnd() * 12; };
+      let run = [], hs = [], kind, base, maxLen;
+      const pick = () => { kind = rnd() < 0.25 ? 'ruin' : 'wall'; base = kind === 'ruin' ? 2.2 + rnd() * 1.2 : 1.0 + rnd() * 0.6; maxLen = 8 + rnd() * 14; };
+      const hAt = () => kind === 'ruin' ? base * (0.55 + rnd() * 0.6) : base + (rnd() - 0.5) * 0.15;
+      const flush = (keep) => {
+        if (run.length >= 2) out.push({ p: run, hs, ruin: kind === 'ruin' });
+        const last = keep && run.length ? run[run.length - 1] : null; run = []; hs = []; pick();
+        if (last) { run.push(last); hs.push(hAt()); } // el tramo siguiente empieza donde acaba este: sin huecos
+      };
+      pick();
       for (let i = 0; i < P.length; i++) {
         const n = sideNormal(P, Math.min(i, P.length - 2)), o = r.w / 2 + 0.6, x = P[i][0] + n[0] * o * side, z = P[i][1] + n[1] * o * side;
-        const ok = Math.hypot(x - cx, z - cz) > 45 && Math.hypot(x - cx, z - cz) < 280 && !colliders.nearest(x, z, 2.2) && !onRoad(x, z) && !avoid.some(s => Math.hypot(s.x - x, s.z - z) < 20);
-        if (!ok) { flush(); continue; }
-        run.push([x, z]);
-        if ((run.length - 1) * 2 >= maxLen) { flush(); i += 1 + (rnd() * 2 | 0); } // hueco de 2-4 m: portillo
+        const d = Math.hypot(x - cx, z - cz);
+        const ok = d > 45 && d < 270 && !colliders.nearest(x, z, 0.9) && !onRoad(x, z, r) && !avoid.some(s => Math.hypot(s.x - x, s.z - z) < 20);
+        if (!ok) { flush(false); continue; }
+        run.push([x, z]); hs.push(hAt());
+        if ((run.length - 1) * 2 >= maxLen) flush(true);
       }
-      flush();
+      flush(false);
     }
   }
   return out;
@@ -655,18 +666,23 @@ export function yardWalls(data, colliders, avoid = []) {
 export function buildWalls(data, terrain, tex, colliders) {
   const gb = new GeoBuilder();
   for (const w of data.walls) {
-    const P = densify(w.p, 2); const h = w.h || 1.2, t = 0.25; let dist = 0;
+    const P = w.hs ? w.p : densify(w.p, 2), t = w.ruin ? 0.3 : 0.25; let dist = 0;
+    const H = (i) => w.hs ? w.hs[i] : w.h || 1.2;
     for (let i = 0; i < P.length - 1; i++) {
       const a = P[i], b = P[i + 1], n = sideNormal(P, i), L = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      const ya = terrain.height(a[0], a[1]) - 0.2, yb = terrain.height(b[0], b[1]) - 0.2;
+      const ya = terrain.height(a[0], a[1]) - 0.2, yb = terrain.height(b[0], b[1]) - 0.2, ha = H(i), hb = H(i + 1), h = Math.max(ha, hb);
       for (const s of [1, -1]) {
         const A = [a[0] + n[0] * t * s, a[1] + n[1] * t * s], B = [b[0] + n[0] * t * s, b[1] + n[1] * t * s];
-        const q = [[A[0], ya, A[1]], [B[0], yb, B[1]], [B[0], yb + h, B[1]], [A[0], ya + h, A[1]]];
-        const uv = [[dist / 3, 0], [(dist + L) / 3, 0], [(dist + L) / 3, h / 3], [dist / 3, h / 3]];
+        const q = [[A[0], ya, A[1]], [B[0], yb, B[1]], [B[0], yb + hb, B[1]], [A[0], ya + ha, A[1]]];
+        const uv = [[dist / 3, 0], [(dist + L) / 3, 0], [(dist + L) / 3, hb / 3], [dist / 3, ha / 3]];
         if (s > 0) gb.quad(q[1], q[0], q[3], q[2], uv[1], uv[0], uv[3], uv[2]); else gb.quad(...q, ...uv);
       }
       const A = [a[0] + n[0] * t, a[1] + n[1] * t], B = [b[0] + n[0] * t, b[1] + n[1] * t], C = [b[0] - n[0] * t, b[1] - n[1] * t], D = [a[0] - n[0] * t, a[1] - n[1] * t];
-      gb.quad([D[0], ya + h, D[1]], [C[0], yb + h, C[1]], [B[0], yb + h, B[1]], [A[0], ya + h, A[1]], [0, 0], [L / 3, 0], [L / 3, 0.15], [0, 0.15]);
+      gb.quad([D[0], ya + ha, D[1]], [C[0], yb + hb, C[1]], [B[0], yb + hb, B[1]], [A[0], ya + ha, A[1]], [0, 0], [L / 3, 0], [L / 3, 0.15], [0, 0.15]);
+      if (i === 0 || i === P.length - 2) { // remate del extremo del muro
+        const e = i === 0 ? a : b, ye = i === 0 ? ya : yb, he = i === 0 ? ha : hb, E1 = [e[0] + n[0] * t, e[1] + n[1] * t], E2 = [e[0] - n[0] * t, e[1] - n[1] * t];
+        gb.quad([E1[0], ye, E1[1]], [E2[0], ye, E2[1]], [E2[0], ye + he, E2[1]], [E1[0], ye + he, E1[1]], [0, 0], [0.17, 0], [0.17, he / 3], [0, he / 3]);
+      }
       colliders.addSegment(a[0], a[1], b[0], b[1], 'wall');
       dist += L;
     }

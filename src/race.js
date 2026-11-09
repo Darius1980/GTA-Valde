@@ -95,7 +95,7 @@ class RaceDriver {
 export class Race {
   constructor({ scene, world, roads, start, center, makeCar, ui, sound, toast }) {
     Object.assign(this, { scene, world, makeCar, ui, sound, toast });
-    this.cp = beam(0x3aa0e2); scene.add(this.cp);
+    this.cp = beam(0x3aa0e2, true); scene.add(this.cp);
     this.state = 'idle'; this.cool = 0; this.rivals = [];
     this.SP = 45; // distancia entre puntos de control
     // varios circuitos, cada uno con su salida (círculo rojo) en un sitio distinto
@@ -162,6 +162,7 @@ export class Race {
   playerS() { return Math.min(this.next, this.ncp) * this.SP - Math.hypot(this.car.pos.x - this.cp.position.x, this.car.pos.z - this.cp.position.z); }
   update(dt, driving, pos) {
     if (this.cool > 0) this.cool -= dt;
+    this.offer = null;
     if (this.state === 'idle') {
       const show = this.cool <= 0 && !this.busy?.(); let near = null; this.nearName = null;
       let nearTrial = null;
@@ -172,7 +173,7 @@ export class Race {
         if (show && dt2 < 3.5) { near = c; nearTrial = c; }
         if (show && Math.min(d, dt2) < 25) this.nearName = `${c.name} (récord ${this.rec(c.name)}): rojo carrera, morado contrarreloj`;
       }
-      if (near && driving && !driving.wrecked) this.begin(driving, near, nearTrial === near);
+      if (near && driving && !driving.wrecked) { const trial = nearTrial === near, car = driving; this.offer = { id: `race:${near.name}:${trial}`, text: `${trial ? '⏱️ Contrarreloj' : '🏁 Carrera'}: ${near.name}`, go: () => this.begin(car, near, trial) }; }
       this.nearOnFoot = !!near && !driving;
       return;
     }
