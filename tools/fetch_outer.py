@@ -6,7 +6,7 @@ Uso: python tools/fetch_outer.py <mapa>      (usa "outer_half" de tools/maps.jso
 - IGN MDT 25 m: relieve.
 - IGN PNOA: ortofoto de todo el cuadrado.
 - Catastro: edificios de los pueblos de alrededor (1,5 km en torno a cada uno).
-Se guarda en data/<mapa>/outer/.
+Se guarda en data/<mapa>/outer/; lo ya descargado no se repite (salvo con --force).
 """
 import glob, json, math, os, sys, time, urllib.parse, urllib.request
 from pyproj import Transformer
