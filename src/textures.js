@@ -11,32 +11,35 @@ function tex(c, repeat = true, srgb = true) {
   return t;
 }
 
-// Mampostería de piedra típica de la Carballeda: lajas de pizarra y cuarcita irregulares.
+// Mampostería de piedra típica de la Carballeda: lajas de cuarcita y pizarra ocres y rojizas,
+// planas y alargadas, con mucho mortero claro entre ellas (según las capturas de Street View de Valde).
 function drawStone(g, w, h, r, palette) {
-  g.fillStyle = '#5a5248'; g.fillRect(0, 0, w, h);
-  let y = 0;
+  g.fillStyle = '#a99d8a'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 2500; i++) { const v = r() < 0.5 ? 'rgba(70,60,50,0.10)' : 'rgba(235,228,214,0.12)'; g.fillStyle = v; g.fillRect(r() * w, r() * h, 1 + r() * 3, 1 + r() * 3); }
+  let y = -4;
   while (y < h) {
-    const rowH = 10 + r() * 16; let x = -r() * 30;
+    const rowH = 9 + r() * 14; let x = -r() * 40;
     while (x < w) {
-      const sw = 18 + r() * 42;
+      const sw = 22 + r() * 52, sh = rowH * (0.7 + r() * 0.35);
       const c = palette[Math.floor(r() * palette.length)];
-      const v = (r() - 0.5) * 30;
+      const v = (r() - 0.5) * 26;
       g.fillStyle = `rgb(${c[0] + v | 0},${c[1] + v | 0},${c[2] + v | 0})`;
+      const j = () => (r() - 0.5) * 5, x0 = x + 2.5, x1 = x + sw - 2.5, y0 = y + 2 + r() * 2, y1 = y0 + sh - 3;
       g.beginPath();
-      const j = () => (r() - 0.5) * 4;
-      g.moveTo(x + 2 + j(), y + 2 + j()); g.lineTo(x + sw - 2 + j(), y + 2 + j());
-      g.lineTo(x + sw - 2 + j(), y + rowH - 2 + j()); g.lineTo(x + 2 + j(), y + rowH - 2 + j());
+      g.moveTo(x0 + j(), y0 + 2 + j()); g.lineTo(x0 + sw * 0.3 + j(), y0 + j()); g.lineTo(x1 - 2 + j(), y0 + 1 + j());
+      g.lineTo(x1 + j(), (y0 + y1) / 2 + j()); g.lineTo(x1 - 3 + j(), y1 + j()); g.lineTo(x0 + sw * 0.5 + j(), y1 + 1 + j()); g.lineTo(x0 + 1 + j(), y1 - 1 + j());
       g.closePath(); g.fill();
-      // sombreado en la parte baja de cada piedra
-      g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(x + 2, y + rowH - 5, sw - 4, 3);
-      g.fillStyle = 'rgba(255,255,255,0.07)'; g.fillRect(x + 3, y + 3, sw - 6, 2);
+      // vetas y manchas de óxido de la cuarcita
+      for (let k = 0; k < 3; k++) { g.fillStyle = r() < 0.5 ? 'rgba(120,60,30,0.18)' : 'rgba(240,220,190,0.12)'; g.fillRect(x0 + r() * (sw - 8), y0 + r() * (sh - 5), 4 + r() * 14, 1 + r() * 3); }
+      g.fillStyle = 'rgba(0,0,0,0.16)'; g.fillRect(x0 + 2, y1 - 2, sw - 9, 2);
+      g.fillStyle = 'rgba(255,240,220,0.10)'; g.fillRect(x0 + 3, y0 + 1, sw - 10, 2);
       x += sw;
     }
     y += rowH;
   }
 }
 
-const STONE = [[122, 112, 98], [104, 98, 90], [138, 124, 104], [92, 86, 80], [150, 132, 108], [116, 104, 86]];
+const STONE = [[184, 128, 88], [166, 112, 76], [156, 124, 96], [134, 112, 92], [182, 150, 116], [118, 102, 88], [160, 100, 66], [196, 162, 126], [146, 136, 122], [128, 120, 110]];
 
 function drawWindow(g, x, y, w, h, r) {
   // dintel y jambas de piedra, contraventanas de madera
@@ -65,26 +68,27 @@ export function makeTextures(renderer) {
 
   // Fachadas a escala real: cada textura es una planta de 4 m x 3 m (128 px por metro).
   // Ventanas de 0,9 x 1,2 m con alféizar a 0,9 m; puertas de 1 x 2,2 m.
-  const upper = (g, r) => { drawWindow(g, 70, 115, 115, 154, r); drawWindow(g, 327, 115, 115, 154, r); };
-  const ground = (g, r) => { drawDoor(g, 60, 102, 128, 282, r); drawWindow(g, 327, 115, 115, 154, r); };
-  const stoneBase = (g, r) => drawStone(g, 512, 384, r, STONE);
-  const plasterBase = (g, r) => {
-    g.fillStyle = '#d9cfbd'; g.fillRect(0, 0, 512, 384);
-    for (let i = 0; i < 4000; i++) { g.fillStyle = `rgba(${r() < .5 ? 0 : 255},${r() < .5 ? 0 : 240},200,0.05)`; g.fillRect(r() * 512, r() * 384, 2 + r() * 5, 2 + r() * 5); }
+  const upper = (g, r) => { drawWindow(g, 210, 120, 100, 130, r); };
+  // la planta baja mide 8 m: una puerta y dos ventanas pequeñas (las casas del pueblo tienen pocos huecos)
+  const ground = (g, r) => { drawDoor(g, 120, 102, 128, 282, r); drawWindow(g, 470, 125, 90, 115, r); drawWindow(g, 830, 125, 90, 115, r); };
+  const stoneBase = (g, r, w) => drawStone(g, w, 384, r, STONE);
+  const plasterBase = (g, r, w) => {
+    g.fillStyle = '#d9cfbd'; g.fillRect(0, 0, w, 384);
+    for (let i = 0; i < 8000; i++) { g.fillStyle = `rgba(${r() < .5 ? 0 : 255},${r() < .5 ? 0 : 240},200,0.05)`; g.fillRect(r() * w, r() * 384, 2 + r() * 5, 2 + r() * 5); }
   };
   for (const [name, baseFn, openFn, seed] of [['facade', stoneBase, upper, 7], ['facadeGround', stoneBase, ground, 8],
     ['facadePlaster', plasterBase, upper, 11], ['facadePlasterGround', plasterBase, ground, 12]]) {
-    const [c, g] = canvas(512, 384); const r = rng(seed);
-    baseFn(g, r);
-    if (name === 'facadePlasterGround') { g.fillStyle = 'rgba(80,60,40,0.25)'; g.fillRect(0, 330, 512, 54); } // zócalo manchado
+    const W = openFn === ground ? 1024 : 512;
+    const [c, g] = canvas(W, 384); const r = rng(seed);
+    baseFn(g, r, W);
+    if (name === 'facadePlasterGround') { g.fillStyle = 'rgba(80,60,40,0.25)'; g.fillRect(0, 330, W, 54); } // zócalo manchado
     openFn(g, r);
     out[name] = tex(c);
     // mapa de luz nocturna: solo el cristal de las ventanas (el shader enciende unas sí y otras no)
-    const [ce, ge] = canvas(128, 96); ge.fillStyle = '#000'; ge.fillRect(0, 0, 128, 96);
+    const [ce, ge] = canvas(W / 4, 96); ge.fillStyle = '#000'; ge.fillRect(0, 0, W / 4, 96);
     const glow = (x, y, w, h) => { const gr = ge.createRadialGradient((x + w / 2) / 4, (y + h / 2) / 4, 2, (x + w / 2) / 4, (y + h / 2) / 4, h / 5);
       gr.addColorStop(0, '#ffd890'); gr.addColorStop(1, '#c87a30'); ge.fillStyle = gr; ge.fillRect(x / 4, y / 4, w / 4, h / 4); };
-    if (openFn === upper) glow(70, 115, 115, 154);
-    glow(327, 115, 115, 154);
+    if (openFn === upper) glow(210, 120, 100, 130); else { glow(470, 125, 90, 115); glow(830, 125, 90, 115); }
     out[name + 'Night'] = tex(ce);
   }
   // Sillería de granito (iglesia)
@@ -133,10 +137,10 @@ export function makeTextures(renderer) {
   // Hormigón de calle de pueblo
   {
     const [c, g] = canvas(256, 256); const r = rng(13);
-    g.fillStyle = '#9a958a'; g.fillRect(0, 0, 256, 256);
+    g.fillStyle = '#a6a196'; g.fillRect(0, 0, 256, 256);
     for (let i = 0; i < 7000; i++) { const v = 120 + r() * 60 | 0; g.fillStyle = `rgba(${v},${v - 4},${v - 12},0.35)`; g.fillRect(r() * 256, r() * 256, 1 + r() * 3, 1 + r() * 3); }
     g.fillStyle = 'rgba(40,35,30,0.35)'; g.fillRect(0, 0, 256, 2); // junta
-    for (let i = 0; i < 30; i++) { g.fillStyle = 'rgba(70,60,50,0.12)'; g.beginPath(); g.arc(r() * 256, r() * 256, 4 + r() * 18, 0, 7); g.fill(); }
+    for (let i = 0; i < 10; i++) { g.fillStyle = 'rgba(70,60,50,0.06)'; g.beginPath(); g.arc(r() * 256, r() * 256, 4 + r() * 14, 0, 7); g.fill(); }
     out.concrete = tex(c);
   }
   // Tierra de camino

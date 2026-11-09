@@ -189,6 +189,7 @@ export function buildBuildings(data, terrain, tex, colliders) {
     for (const gb of [facade, plaster, facadeGround, plasterGround, stone, ashlar, ...urbanB, ...groundB]) gb.tint = [t, t * (0.97 + rnd() * 0.05), t * (0.95 + rnd() * 0.05)];
     const age = rnd(); roof.tint = [0.75 + 0.3 * (1 - age), 0.72 + 0.25 * (1 - age) + 0.08 * age, 0.7 + 0.2 * age];
     const gH = urban ? 3.6 : 3.0, gTop = top + gH; // planta baja
+    const u0 = rnd(); // la puerta cae en un sitio distinto en cada casa
     const parapet = isFlat ? 0.9 : 0;
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i], c = pts[(i + 1) % pts.length];
@@ -201,7 +202,18 @@ export function buildBuildings(data, terrain, tex, colliders) {
       for (let s = 0; s < segs.length - 1; s++) {
         const [p, lp] = segs[s], [q, lq] = segs[s + 1];
         const wTop = eave + parapet;
-        if (gB && gTop < wTop - (urban ? 2 : 0.4)) {
+        if (!urban && gB) {
+          // casa de pueblo: las plantas se cuentan desde el alero hacia abajo (la de abajo con puerta);
+          // donde la calle baja en cuesta, queda un zócalo de mampostería sin ventanas
+          const rows = Math.max(1, Math.min(floors, Math.floor((wTop - top + 0.4) / tileH)));
+          const rBot = wTop - rows * tileH;
+          if (rBot > y0) stone.quad([p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], rBot, q[1]], [p[0], rBot, p[1]],
+            [lp / 4, 0], [lq / 4, 0], [lq / 4, (rBot - y0) / 3], [lp / 4, (rBot - y0) / 3]);
+          gB.quad([p[0], rBot, p[1]], [q[0], rBot, q[1]], [q[0], rBot + tileH, q[1]], [p[0], rBot + tileH, p[1]],
+            [u0 + lp / 8, 0], [u0 + lq / 8, 0], [u0 + lq / 8, 1], [u0 + lp / 8, 1]);
+          if (rows > 1) wallB.quad([p[0], rBot + tileH, p[1]], [q[0], rBot + tileH, q[1]], [q[0], wTop, q[1]], [p[0], wTop, p[1]],
+            [lp * uScale, 0], [lq * uScale, 0], [lq * uScale, rows - 1], [lp * uScale, rows - 1]);
+        } else if (gB && gTop < wTop - (urban ? 2 : 0.4)) {
           // planta baja con su textura; encima, las plantas de viviendas alineadas desde arriba
           const gu = (urban ? Math.max(1, Math.round(L / 4)) : nTiles) / L;
           const gBot = gTop - gH;
@@ -412,7 +424,9 @@ export function buildRoads(data, terrain, tex, colliders) {
     }
   }
   for (const r of data.roads) {
-    const gb = byMat[r.s] || byMat.asphalt; const hw = r.w / 2;
+    // las calles del pueblo son de hormigón (como la calle del Río en Street View); las carreteras, de asfalto
+    const villageStreet = !urban && (r.k === 'residential' || r.k === 'living_street') && r.s === 'asphalt';
+    const gb = villageStreet ? byMat.concrete : byMat[r.s] || byMat.asphalt; const hw = r.w / 2;
     const P = densify(r.p, 2.5); let dist = 0;
     for (let i = 0; i < P.length - 1; i++) {
       const a = P[i], b = P[i + 1];
@@ -477,8 +491,56 @@ export function buildRoads(data, terrain, tex, colliders) {
     });
     im.castShadow = true; group.add(im, ih); group.userData.lamps = lamps;
   }
+  if (!urban && colliders) group.add(utilityPoles(data, terrain, colliders));
   if (lines.pos.length) group.add(new THREE.Mesh(lines.build(), new THREE.MeshStandardMaterial({ color: 0xe8e8e0, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -4 })));
   return group;
+}
+// postes de madera del tendido eléctrico con su farola de brazo y los cables combados entre poste y poste
+function utilityPoles(data, terrain, colliders) {
+  const [cx, cz] = data.plaza?.start || data.spawn, H = 7.2, poles = [], wires = [];
+  for (const r of data.roads) {
+    if (!['residential', 'living_street', 'tertiary', 'unclassified'].includes(r.k)) continue;
+    const P = densify(r.p, 2); let dist = 0, next = 6, prev = null;
+    for (let i = 0; i < P.length - 1; i++) {
+      const a = P[i], b = P[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]); dist += L;
+      if (dist < next || Math.hypot(a[0] - cx, a[1] - cz) > 300) continue;
+      const n = sideNormal(P, i); let spot = null;
+      for (const side of [1, -1]) {
+        const o = r.w / 2 + 0.45, x = a[0] + n[0] * o * side, z = a[1] + n[1] * o * side;
+        if (!colliders.nearest(x, z, 0.6) && !poles.some(p => Math.hypot(p[0] - x, p[1] - z) < 12)) { spot = [x, z, Math.atan2(-n[0] * side, -n[1] * side)]; break; }
+      }
+      if (!spot) { next = dist + 4; continue; }
+      poles.push(spot); next = dist + 30 + (poles.length % 3) * 4;
+      if (prev && Math.hypot(prev[0] - spot[0], prev[1] - spot[1]) < 45) wires.push([prev, spot]);
+      prev = spot;
+    }
+  }
+  const g = new THREE.Group(); if (!poles.length) return g;
+  const pole = new THREE.CylinderGeometry(0.09, 0.13, H, 6); pole.translate(0, H / 2, 0);
+  const cross = new THREE.BoxGeometry(0.9, 0.08, 0.08); cross.translate(0, H - 0.3, 0);
+  const arm = new THREE.CylinderGeometry(0.035, 0.035, 1.5, 5); arm.rotateX(Math.PI / 2 - 0.25); arm.translate(0, H - 1.6, 0.7);
+  const head = new THREE.BoxGeometry(0.22, 0.1, 0.5); head.translate(0, H - 1.42, 1.45);
+  const wood = new THREE.MeshStandardMaterial({ color: 0x4d3b2a, roughness: 1 }), metal = new THREE.MeshStandardMaterial({ color: 0x8a8d90, roughness: 0.5, metalness: 0.5 });
+  const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff4d8, emissive: 0xffd8a0, emissiveIntensity: 0, roughness: 0.3 }); night.lamps.push(lampMat);
+  const ip = new THREE.InstancedMesh(mergeGeometries([pole, cross]), wood, poles.length), ia = new THREE.InstancedMesh(arm, metal, poles.length), ih = new THREE.InstancedMesh(head, lampMat, poles.length);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
+  poles.forEach(([x, z, rot], i) => {
+    q.setFromAxisAngle(up, rot); m.compose(new THREE.Vector3(x, terrain.height(x, z), z), q, one);
+    ip.setMatrixAt(i, m); ia.setMatrixAt(i, m); ih.setMatrixAt(i, m);
+    colliders.addSegment(x - 0.12, z, x + 0.12, z, 'tree');
+  });
+  ip.castShadow = true; g.add(ip, ia, ih);
+  // dos cables por vano, a los extremos de la cruceta, con su catenaria
+  const pts = [];
+  for (const [a, b] of wires) for (const off of [-0.4, 0.4]) {
+    const ya = terrain.height(a[0], a[1]) + H - 0.25, yb = terrain.height(b[0], b[1]) + H - 0.25;
+    const ax = a[0] + Math.cos(a[2]) * off, az = a[1] - Math.sin(a[2]) * off, bx = b[0] + Math.cos(b[2]) * off, bz = b[1] - Math.sin(b[2]) * off;
+    const L = Math.hypot(bx - ax, bz - az), sag = 0.012 * L * L / 10 + 0.3;
+    for (let k = 0; k < 8; k++) for (const t of [k / 8, (k + 1) / 8]) pts.push(ax + (bx - ax) * t, ya + (yb - ya) * t - Math.sin(t * Math.PI) * sag, az + (bz - az) * t);
+  }
+  const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  g.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0x1a1a1a })));
+  return g;
 }
 function densify(p, step) {
   const out = [p[0]];
@@ -593,13 +655,13 @@ export function buildTerrain(meta, terrain, orthoFull, orthoCenter, tex, mask = 
   const fb = meta.ortho.full, cb = meta.ortho.center;
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.tCenter = { value: orthoCenter }; sh.uniforms.tDetail = { value: tex.detail };
-    sh.uniforms.tMask = { value: mask?.tex || null }; sh.uniforms.maskB = { value: mask?.bounds || new THREE.Vector4(0, 0, 1, 1) }; sh.uniforms.tAsph = { value: tex.asphalt };
+    sh.uniforms.tMask = { value: mask?.tex || null }; sh.uniforms.maskB = { value: mask?.bounds || new THREE.Vector4(0, 0, 1, 1) }; sh.uniforms.tAsph = { value: tex.asphalt }; sh.uniforms.tConc = { value: tex.concrete };
     sh.uniforms.fullB = { value: new THREE.Vector4(...fb) }; sh.uniforms.centerB = { value: new THREE.Vector4(...cb) };
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = (modelMatrix * vec4(transformed,1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
       varying vec3 vWPos; uniform sampler2D tCenter; uniform sampler2D tDetail; uniform vec4 fullB; uniform vec4 centerB;
-      uniform sampler2D tMask; uniform sampler2D tAsph; uniform vec4 maskB;`)
+      uniform sampler2D tMask; uniform sampler2D tAsph; uniform sampler2D tConc; uniform vec4 maskB;`)
       .replace('#include <map_fragment>', `
       vec2 uvF = vec2((vWPos.x - fullB.x) / (fullB.z - fullB.x), (vWPos.z - fullB.y) / (fullB.w - fullB.y));
       vec4 col = texture2D(map, uvF);
@@ -613,8 +675,8 @@ export function buildTerrain(meta, terrain, orthoFull, orthoCenter, tex, mask = 
       col.rgb = pow(col.rgb, vec3(1.08)) * 1.08; // la ortofoto es plana; algo de contraste
       ${mask ? `vec2 uvM = (vWPos.xz - maskB.xy) / maskB.zw;
       if (uvM.x > 0.0 && uvM.x < 1.0 && uvM.y > 0.0 && uvM.y < 1.0) {
-        float a = smoothstep(0.25, 0.75, texture2D(tMask, uvM).r);
-        vec3 asph = texture2D(tAsph, vWPos.xz / 4.0).rgb * (0.92 + 0.16 * d);
+        vec4 mk = texture2D(tMask, uvM); float a = smoothstep(0.25, 0.75, mk.r);
+        vec3 asph = mix(texture2D(tConc, vWPos.xz / 4.0).rgb, texture2D(tAsph, vWPos.xz / 4.0).rgb, smoothstep(0.3, 0.7, mk.g / max(mk.r, 0.01))) * (0.92 + 0.16 * d);
         col.rgb = mix(col.rgb, asph, a);
       }` : ''}
       diffuseColor *= col;`);
@@ -653,10 +715,13 @@ export function smoothRoads(roads, iters = 2) {
 export function villageMask(data, center, R = 320, size = 1024) {
   const c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d');
   const s = size / (2 * R), X = (x) => (x - center[0] + R) * s, Y = (z) => (z - center[1] + R) * s;
-  g.strokeStyle = '#fff'; g.lineCap = 'round'; g.lineJoin = 'round'; g.filter = 'blur(2px)';
-  for (const r of data.roads) {
+  // rojo: suelo pavimentado; verde: de asfalto (carreteras). Las calles sin verde son de hormigón.
+  g.lineCap = 'round'; g.lineJoin = 'round'; g.filter = 'blur(2px)';
+  const conc = (r) => r.k === 'residential' || r.k === 'living_street';
+  for (const pass of [0, 1]) for (const r of data.roads) {
     if (r.k === 'track' || r.k === 'path' || r.k === 'trunk') continue;
-    g.lineWidth = (r.w + 6) * s; g.beginPath();
+    if (pass !== (conc(r) ? 0 : 1)) continue;
+    g.strokeStyle = pass ? '#ff0' : '#f00'; g.lineWidth = (r.w + (pass ? 4 : 5)) * s; g.beginPath();
     r.p.forEach((p, i) => i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))); g.stroke();
   }
   // solo dentro del casco urbano: se desvanece hacia las afueras
