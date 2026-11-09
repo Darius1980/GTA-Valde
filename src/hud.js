@@ -26,6 +26,13 @@ export class Minimap {
     }
     g.fillStyle = 'rgba(255,255,255,0.85)';
     for (const w of extra.walkers || []) { const x = (w.pos.x - px) * k, y = (w.pos.z - pz) * k; if (x * x + y * y < r * r) g.fillRect(x - 1.5, y - 1.5, 3, 3); }
+    // salidas de las carreras: banderitas rojas (en el borde si están lejos)
+    for (const f of extra.flags || []) {
+      let x = (f[0] - px) * k, y = (f[1] - pz) * k; const d = Math.hypot(x, y), lim = r - 7;
+      if (d > lim) { x *= lim / d; y *= lim / d; }
+      g.fillStyle = '#e2403a'; g.strokeStyle = '#000'; g.lineWidth = 1;
+      g.beginPath(); g.arc(x, y, 4, 0, 7); g.fill(); g.stroke();
+    }
     // objetivo de la misión (en el borde si está lejos)
     if (extra.target) {
       let x = (extra.target[0] - px) * k, y = (extra.target[1] - pz) * k; const d = Math.hypot(x, y), lim = r - 9;

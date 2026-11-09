@@ -141,7 +141,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   let bellTimer = 0, bellRing = null;
   const clockEl = document.getElementById('clock'), gearBtn = document.querySelector('[data-btn=gear]');
   const race = new Race({
-    scene, world, net, start: data.race_start || [data.spawn[0] + 20, data.spawn[1] + 10], ui, sound: k => engine.blip(k), toast: (a, b) => missions.toast(a, b),
+    scene, world, roads: data.roads, center: data.plaza?.start || data.spawn, start: data.race_start || [data.spawn[0] + 20, data.spawn[1] + 10], ui, sound: k => engine.blip(k), toast: (a, b) => missions.toast(a, b),
     makeCar: (col) => { const c = new Car(world, col, 'sedan', data.carScale || 1); scene.add(c.mesh); cars.push(c); return c; },
   });
   race.onRemove = (c) => { scene.remove(c.mesh); for (const sp of c.smoke) scene.remove(sp); const i = cars.indexOf(c); if (i >= 0 && c !== driving) cars.splice(i, 1); };
@@ -232,14 +232,14 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     sun.position.copy(target).addScaledVector(dayNight.light, 200); sun.target.position.copy(target);
 
     engine.update(!!driving, driving ? driving.speed : 0, driving ? input.axes().y : 0, driving ? driving.gear : 1);
-    if ((frameNo++ & 1) === 0) minimap.draw(target.x, target.z, driving ? driving.heading : player.heading, camState.yaw, cars, driving, { walkers, target: race.target || missions.target, targetColor: race.target ? '#3aa0e2' : missions.state === 'deliver' ? '#47d16c' : '#f5c542' });
+    if ((frameNo++ & 1) === 0) minimap.draw(target.x, target.z, driving ? driving.heading : player.heading, camState.yaw, cars, driving, { walkers, flags: race.starts, target: race.target || missions.target, targetColor: race.target ? '#3aa0e2' : missions.state === 'deliver' ? '#47d16c' : '#f5c542' });
     camera.fov += ((driving ? 60 + Math.min(15, Math.abs(driving.speed) * 0.5) : 60) - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix();
     if (driving && gearBtn.dataset.g !== String(driving.gear)) { gearBtn.dataset.g = driving.gear; gearBtn.textContent = driving.gear === 1 ? 'C' : 'L'; }
     hud.mode.textContent = driving ? `${driving.gear === 1 ? 'Corta' : 'Larga'} · ${driving.wrecked ? 'averiado' : `daños ${Math.round(100 - driving.health)} %`}` : 'A pie';
     if ((frameNo & 15) === 0) clockEl.textContent = (dayNight.n > 0.5 ? '🌙 ' : '☀️ ') + dayNight.clock;
     hud.speed.textContent = driving ? `${Math.round(Math.abs(driving.speed) * 3.6)} km/h` : '';
     const near = !driving && cars.some(c => c.pos.distanceTo(player.pos) < 4.5);
-    hud.hint.textContent = race.nearOnFoot ? 'Necesitas un coche para la carrera' : driving?.wrecked ? 'Coche averiado: bájate y coge otro' : driving ? (input.touch ? 'Pulsa 🚪 para bajar' : 'E para bajar') : near ? (input.touch ? 'Pulsa 🚪 para subir al coche' : 'E para subir al coche') : '';
+    hud.hint.textContent = race.nearOnFoot ? 'Necesitas un coche para la carrera' : race.nearName && !race.active ? `🏁 ${race.nearName}: entra en el círculo rojo con un coche` : driving?.wrecked ? 'Coche averiado: bájate y coge otro' : driving ? (input.touch ? 'Pulsa 🚪 para bajar' : 'E para bajar') : near ? (input.touch ? 'Pulsa 🚪 para subir al coche' : 'E para subir al coche') : '';
     document.body.classList.toggle('driving', !!driving);
     input.driving = !!driving;
     input.endFrame();
