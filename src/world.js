@@ -849,7 +849,7 @@ export function terrainMaterial(orthoFull, orthoCenter, fb, cb, tex, mask = null
       col.rgb = pow(col.rgb, vec3(1.08)) * 1.08; // la ortofoto es plana; algo de contraste
       ${mask ? `vec2 uvM = (vWPos.xz - maskB.xy) / maskB.zw;
       if (uvM.x > 0.0 && uvM.x < 1.0 && uvM.y > 0.0 && uvM.y < 1.0) {
-        vec4 mk = texture2D(tMask, uvM); float a = smoothstep(0.25, 0.75, mk.r);
+        vec4 mk = texture2D(tMask, uvM); float a = smoothstep(0.3, 0.7, mk.a); // alfa: el rojo vale 255 hasta en el borde difuminado y ensanchaba el asfalto
         vec3 asph = mix(texture2D(tConc, vWPos.xz / 4.0).rgb, texture2D(tAsph, vWPos.xz / 4.0).rgb, smoothstep(0.3, 0.7, mk.g / max(mk.r, 0.01))) * (0.92 + 0.16 * d);
         // fuera de la calle, dentro del pueblo: tierra (la ortofoto de cerca es una mancha)
         float vf = 1.0 - smoothstep(200.0, 290.0, length(vWPos.xz - maskB.xy - maskB.zw * 0.5));
@@ -899,7 +899,7 @@ export function villageMask(data, center, R = 320, size = 1024) {
   for (const pass of [0, 1]) for (const r of data.roads) {
     if (r.k === 'track' || r.k === 'path' || r.k === 'trunk') continue;
     if (pass !== (conc(r) ? 0 : 1)) continue;
-    g.strokeStyle = pass ? '#ff0' : '#f00'; g.lineWidth = (r.w + 0.6) * s; // solo la calle: lo de al lado es tierra (Darío) g.beginPath();
+    g.strokeStyle = pass ? '#ff0' : '#f00'; g.lineWidth = (r.w + 0.3) * s; g.beginPath(); // solo la calle: lo de al lado es tierra (Darío)
     r.p.forEach((p, i) => i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))); g.stroke();
   }
   // solo dentro del casco urbano: se desvanece hacia las afueras
