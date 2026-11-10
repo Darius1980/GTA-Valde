@@ -3,7 +3,11 @@ const cv = document.getElementById('cv'), g = cv.getContext('2d'), map = documen
 const img = new Image(); img.src = 'ortho_center.jpg'; img.onload = draw;
 let view = { cx: -10, cz: 10, s: 2 }; // centro (m) y píxeles por metro
 // mode: wall | ruin | bld (dibujar) · gone (quitar casa del Catastro) · del (borrar algo mío)
-let wallGone = new Map(), noAuto = false, colWallGone = null, trees = [], treeGone = new Map(), colTree = null, colTreeGone = null, off = [0, 0], offSaved = [0, 0], fz = 1, frot = 0, mode = 'wall', cur = [], items = [], gone = new Map(), sel = null, showGame = true, db = null, col = null, colGone = null;
+let shaped = new Map(), colShape = null, wallGone = new Map(), noAuto = false, colWallGone = null, trees = [], treeGone = new Map(), colTree = null, colTreeGone = null, off = [0, 0], offSaved = [0, 0], fz = 1, frot = 0, mode = 'wall', cur = [], items = [], gone = new Map(), sel = null, showGame = true, db = null, col = null, colGone = null;
+const hist = []; // pasos para deshacer: { undo(): void|Promise, alive?(): bool }
+const push = (undo, alive) => { hist.push({ undo, alive }); if (hist.length > 200) hist.shift(); };
+const newId = () => Array.from({ length: 20 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.random() * 36 | 0]).join('');
+const editPts = () => sel?.item && (!$('edit').hidden || !$('shapeBar').hidden);
 const $ = id => document.getElementById(id), status = t => { $('status').textContent = t; };
 const drawing = () => ['wall', 'ruin', 'bld', 'tree', 'untree', 'rock'].includes(mode), area = () => ['bld', 'tree', 'untree', 'rock'].includes(mode);
 function resize() { const r = map.getBoundingClientRect(), d = devicePixelRatio || 1; cv.width = r.width * d; cv.height = r.height * d; g.setTransform(d, 0, 0, d, 0, 0); draw(); }
@@ -24,11 +28,11 @@ function draw() {
   g.lineCap = 'round'; g.lineJoin = 'round';
   // casas del Catastro (las que se quitan, en rojo y tachadas)
   for (const b of DATA.b) {
-    const off = gone.has(docId(keyOf(b)));
-    path(b.p, true);
+    const k = docId(keyOf(b)), off = gone.has(k), editing = sel?.cat === b && sel.item, bp = editing ? sel.item.p : shaped.get(k)?.p || b.p;
+    path(bp, true);
     if (off) { if (mode === 'gone') { g.setLineDash([4, 4]); g.lineWidth = 1.5; g.strokeStyle = 'rgba(255,59,48,0.7)'; g.stroke(); g.setLineDash([]); } } // quitada: no se ve (en Quitar casa, un contorno tenue para recuperarla)
-    else { g.fillStyle = 'rgba(255,255,255,0.12)'; g.fill(); g.lineWidth = 1.2; g.strokeStyle = 'rgba(255,255,255,0.85)'; g.stroke(); }
-    if (sel && sel.cat === b) { path(b.p, true); g.lineWidth = 4; g.strokeStyle = '#4fc3f7'; g.stroke(); }
+    else { g.fillStyle = 'rgba(255,255,255,0.12)'; g.fill(); g.lineWidth = shaped.has(k) ? 2 : 1.2; g.strokeStyle = shaped.has(k) ? '#ffd54f' : 'rgba(255,255,255,0.85)'; g.stroke(); }
+    if (sel && sel.cat === b) { path(bp, true); g.lineWidth = 4; g.strokeStyle = '#4fc3f7'; g.stroke(); }
   }
   // árboles: los del juego (verde oscuro), los quitados (aspa roja) y los nuevos (verde vivo)
   const tr = Math.max(2.5, 2.2 * view.s);
@@ -52,6 +56,7 @@ function draw() {
       if (view.s > 1.2) { const c = it.p.reduce((a, q) => [a[0] + q[0] / it.p.length, a[1] + q[1] / it.p.length], [0, 0]), [a, b] = toS(c[0], c[1]); g.font = '700 12px system-ui'; g.fillStyle = '#fff'; g.textAlign = 'center'; g.fillText(it.floors + 'P', a, b + 4); g.textAlign = 'start'; } }
     else { path(it.p); const wdt = { baja: 3, media: 5, alta: 8 }[it.alto] || 5; g.lineWidth = hi ? wdt + 4 : wdt; g.strokeStyle = hi ? '#4fc3f7' : (it.kind === 'ruin' ? C('--ruin') : it.mat === 'bloque' ? C('--block') : C('--wall')); g.stroke(); }
   }
+  if (editPts()) for (const q of sel.item.p) { const [a, b] = toS(q[0], q[1]); g.beginPath(); g.arc(a, b, 6, 0, 7); g.fillStyle = '#4fc3f7'; g.fill(); g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke(); }
   if (cur.length) {
     const cc = mode === 'wall' && $('wmat').value === 'bloque' ? C('--block') : mode === 'ruin' ? C('--ruin') : mode === 'bld' ? C('--bld') : mode === 'tree' ? C('--tree') : mode === 'untree' ? C('--gone') : mode === 'rock' ? C('--rock') : C('--wall');
     path(cur, area() && cur.length > 2); if (area() && cur.length > 2) { g.fillStyle = 'rgba(155,155,155,0.3)'; g.fill(); }
@@ -66,19 +71,20 @@ function draw() {
   if (nR) parts0.push(nR + (nR === 1 ? ' zona de rocas' : ' zonas de rocas'));
   if (nZ) parts0.push(nZ + (nZ === 1 ? ' zona de árboles' : ' zonas de árboles'));
   if (nL) parts.push(nL + (nL === 1 ? ' línea' : ' líneas')); if (nB) parts.push(nB + (nB === 1 ? ' edificio nuevo' : ' edificios nuevos')); if (wallGone.size && !noAuto) parts.push(wallGone.size + (wallGone.size === 1 ? ' tapia del juego quitada' : ' tapias del juego quitadas')); if (noAuto) parts.push('sin tapias del juego');
+  if (shaped.size) parts.push(shaped.size + (shaped.size === 1 ? ' casa con otra forma' : ' casas con otra forma'));
   if (gone.size) parts.push(gone.size + (gone.size === 1 ? ' casa quitada' : ' casas quitadas'));
   parts.push(...parts0);
   $('count').textContent = parts.length ? parts.join(' · ') : 'Nada dibujado aún';
-  $('bUndo').disabled = !cur.length; $('bSave').disabled = !col || cur.length < (area() ? 3 : 2);
+  $('bUndo').disabled = !hist.some(h => !h.alive || h.alive()); $('bSave').disabled = !col || cur.length < (area() ? 3 : 2);
   $('bSave').textContent = mode === 'bld' ? 'Guardar edificio' : area() ? 'Guardar zona' : 'Guardar línea';
 }
 function setMode(m) {
-  mode = m; for (const [id, k] of [['bWall', 'wall'], ['bRuin', 'ruin'], ['bBld', 'bld'], ['bGone', 'gone'], ['bDel', 'del'], ['bPhoto', 'photo'], ['bTree', 'tree'], ['bUntree', 'untree'], ['bUnwall', 'unwall'], ['bRock', 'rock']]) $(id).setAttribute('aria-pressed', String(k === m));
+  mode = m; for (const [id, k] of [['bWall', 'wall'], ['bRuin', 'ruin'], ['bBld', 'bld'], ['bGone', 'gone'], ['bDel', 'del'], ['bPhoto', 'photo'], ['bTree', 'tree'], ['bUntree', 'untree'], ['bUnwall', 'unwall'], ['bRock', 'rock'], ['bShape', 'shape']]) $(id).setAttribute('aria-pressed', String(k === m));
   $('nudge').hidden = m !== 'photo';
   $('floors').hidden = m !== 'bld'; $('wmat').hidden = m !== 'wall'; $('whigh').hidden = !['wall', 'ruin', 'rock'].includes(m);
-  if (!drawing()) cur = []; sel = null; $('confirm').hidden = true; $('edit').hidden = true; draw();
+  if (!drawing()) cur = []; sel = null; $('confirm').hidden = true; $('edit').hidden = true; $('shapeBar').hidden = true; draw();
 }
-for (const [id, k] of [['bWall', 'wall'], ['bRuin', 'ruin'], ['bBld', 'bld'], ['bGone', 'gone'], ['bDel', 'del'], ['bPhoto', 'photo'], ['bTree', 'tree'], ['bUntree', 'untree'], ['bUnwall', 'unwall'], ['bRock', 'rock']]) $(id).onclick = () => setMode(k);
+for (const [id, k] of [['bWall', 'wall'], ['bRuin', 'ruin'], ['bBld', 'bld'], ['bGone', 'gone'], ['bDel', 'del'], ['bPhoto', 'photo'], ['bTree', 'tree'], ['bUntree', 'untree'], ['bUnwall', 'unwall'], ['bRock', 'rock'], ['bShape', 'shape']]) $(id).onclick = () => setMode(k);
 // ajuste de la foto: flechas de 25 cm (norte arriba) y arrastre
 const showOff = () => { $('offTxt').textContent = (off[0] >= 0 ? '+' : '') + off[0].toFixed(2) + ' E, ' + (-off[1] >= 0 ? '+' : '') + (-off[1]).toFixed(2) + ' N m · ' + (fz * 100).toFixed(1) + ' % · ' + frot.toFixed(1) + '°'; };
 for (const [id, k] of [['zIn', 1.002], ['zOut', 1 / 1.002]]) $(id).onclick = () => { fz *= k; showOff(); draw(); };
@@ -89,7 +95,16 @@ $('bPhotoSave').onclick = async () => {
   try { await db.collection('ajuste').doc('foto').set({ dx: Math.round(off[0] * 100) / 100, dz: Math.round(off[1] * 100) / 100, scale: Math.round(fz * 10000) / 10000, rot: frot, at: Date.now() }); offSaved = off.slice(); status('Ajuste de la foto guardado'); }
   catch (e) { status('No se ha podido guardar el ajuste (' + (e.message || e.code) + ')'); }
 };
-$('bUndo').onclick = () => { cur.pop(); draw(); };
+async function undo() {
+  while (hist.length) {
+    const h = hist.pop(); if (h.alive && !h.alive()) continue;
+    try { await h.undo(); status('Deshecho'); } catch (e) { status('No se ha podido deshacer (' + (e.message || e.code) + ')'); }
+    draw(); return;
+  }
+  status('No hay nada que deshacer');
+}
+$('bUndo').onclick = undo;
+addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !/SELECT|INPUT/.test(e.target.tagName)) { e.preventDefault(); undo(); } });
 $('showGame').onchange = e => { showGame = e.target.checked; draw(); };
 $('bSave').onclick = async () => {
   if (!col || cur.length < (area() ? 3 : 2)) return;
@@ -98,22 +113,26 @@ $('bSave').onclick = async () => {
   if (mode === 'rock') doc.alto = $('whigh').value;
   if (mode === 'wall' || mode === 'ruin') { doc.alto = $('whigh').value; doc.mat = mode === 'ruin' ? 'piedra' : $('wmat').value; }
   const keep = cur; cur = []; draw(); status('Guardando…');
-  try { await col.add(doc); status(mode === 'bld' ? 'Edificio guardado' : area() ? 'Zona guardada' : 'Línea guardada'); } catch (e) { cur = keep; draw(); status('No se ha podido guardar (' + (e.message || e.code) + '). Vuelve a pulsar Guardar.'); }
+  try { const id = newId(); await col.doc(id).set(doc); push(() => col.doc(id).delete()); status(mode === 'bld' ? 'Edificio guardado' : area() ? 'Zona guardada' : 'Línea guardada'); } catch (e) { cur = keep; draw(); status('No se ha podido guardar (' + (e.message || e.code) + '). Vuelve a pulsar Guardar.'); }
 };
 $('bNo').onclick = () => { sel = null; $('confirm').hidden = true; draw(); };
 $('bYes').onclick = async () => {
   const s = sel; sel = null; $('confirm').hidden = true; draw(); if (!s) return; status('Guardando…');
   try {
     if (s.reset) { await resetAll(); return; }
-    if (s.item) { await col.doc(s.item.id).delete(); status('Borrado'); }
-    else if (s.cat) { const k = docId(keyOf(s.cat)); if (gone.has(k)) { await colGone.doc(k).delete(); status('La casa vuelve a estar'); } else { await colGone.doc(k).set({ id: s.cat.id, cx: s.cat.c[0], cz: s.cat.c[1], at: Date.now() }); status('Casa quitada'); } }
+    if (s.item) { const raw = s.item.raw, id = s.item.id; await col.doc(id).delete(); push(() => col.doc(id).set(raw)); status('Borrado'); }
+    else if (s.cat) { const k = docId(keyOf(s.cat)), v = { id: s.cat.id, cx: s.cat.c[0], cz: s.cat.c[1], at: Date.now() };
+      if (gone.has(k)) { const old = gone.get(k); await colGone.doc(k).delete(); push(() => colGone.doc(k).set(old)); status('La casa vuelve a estar'); }
+      else { await colGone.doc(k).set(v); push(() => colGone.doc(k).delete()); status('Casa quitada'); } }
   } catch (e) { status('No se ha podido guardar (' + (e.message || e.code) + ')'); }
 };
 // empezar de cero: borra todo lo dibujado y todo lo quitado (el ajuste de la foto se queda)
 $('bReset').onclick = () => { if (!db) return; sel = { reset: true }; ask('¿Borrar todo lo dibujado y lo quitado y empezar de cero? El ajuste de la foto se queda.', 'Sí, empezar de cero'); };
 async function resetAll() {
   status('Borrando todo…');
-  const jobs = [...items.map(i => col.doc(i.id).delete()), ...[...gone.keys()].map(k => colGone.doc(k).delete()), ...[...wallGone.keys()].map(k => colWallGone.doc(k).delete()), db.collection('ajuste').doc('tapias').set({ todas: false, at: Date.now() })];
+  const snapI = items.map(i => [i.id, i.raw]), snapG = [...gone], snapW = [...wallGone], snapA = noAuto, snapF = [...shaped].map(([k, v]) => [k, v.raw]);
+  push(() => Promise.all([...snapF.map(([k, v]) => colShape.doc(k).set(v)), ...snapI.map(([id, v]) => col.doc(id).set(v)), ...snapG.map(([k, v]) => colGone.doc(k).set(v)), ...snapW.map(([k, v]) => colWallGone.doc(k).set(v)), db.collection('ajuste').doc('tapias').set({ todas: snapA, at: Date.now() })]));
+  const jobs = [...snapF.map(([k]) => colShape.doc(k).delete()), ...items.map(i => col.doc(i.id).delete()), ...[...gone.keys()].map(k => colGone.doc(k).delete()), ...[...wallGone.keys()].map(k => colWallGone.doc(k).delete()), db.collection('ajuste').doc('tapias').set({ todas: false, at: Date.now() })];
   const r = await Promise.allSettled(jobs), bad = r.filter(x => x.status === 'rejected').length;
   cur = []; draw(); status(bad ? `Quedan ${bad} cosas sin borrar: vuelve a pulsar Empezar de cero` : 'Plano limpio: empieza de cero');
 }
@@ -124,27 +143,48 @@ function openEdit(it) {
   $('eKind').innerHTML = (line ? ['wall', 'ruin'] : it.kind === 'grove' || it.kind === 'clear' ? ['grove', 'clear'] : [it.kind]).map(k => `<option value="${k}"${k === it.kind ? ' selected' : ''}>${KINDS[k]}</option>`).join('');
   $('eMat').value = it.mat; $('eHigh').value = it.alto; $('eFloors').value = String(it.floors);
   const upd = () => { const k = $('eKind').value; $('eMat').hidden = k !== 'wall'; $('eHigh').hidden = !['wall', 'ruin', 'rocks'].includes(k); $('eFloors').hidden = k !== 'building'; };
+  sel.orig = it.p.map(q => q.slice()); it.p = it.p.map(q => q.slice());
   $('eKind').onchange = upd; upd(); $('edit').hidden = false; draw();
 }
-$('eCancel').onclick = () => { sel = null; $('edit').hidden = true; draw(); };
+$('eCancel').onclick = () => { if (sel?.orig) sel.item.p = sel.orig; sel = null; $('edit').hidden = true; draw(); };
 $('eDel').onclick = () => { const it = sel?.item; if (!it) return; $('edit').hidden = true; ask('¿Borrar ' + (KINDS[it.kind] || 'esto').toLowerCase() + '?', 'Sí, borrar'); };
 $('eSave').onclick = async () => {
   const it = sel?.item; if (!it || !col) return;
-  const k = $('eKind').value, doc = { ...it.raw, kind: k, at: Date.now() };
+  const k = $('eKind').value, prev = it.raw, doc = { ...it.raw, kind: k, xy: it.p.flatMap(q => [Math.round(q[0] * 10) / 10, Math.round(q[1] * 10) / 10]), at: Date.now() };
   delete doc.mat; delete doc.alto; delete doc.floors;
   if (k === 'wall') { doc.mat = $('eMat').value; doc.alto = $('eHigh').value; }
   if (k === 'ruin') { doc.mat = 'piedra'; doc.alto = $('eHigh').value; }
   if (k === 'rocks') doc.alto = $('eHigh').value;
   if (k === 'building') doc.floors = +$('eFloors').value;
   sel = null; $('edit').hidden = true; draw(); status('Guardando…');
-  try { await col.doc(it.id).set(doc); status('Cambios guardados'); } catch (e) { status('No se ha podido guardar (' + (e.message || e.code) + ')'); }
+  try { await col.doc(it.id).set(doc); push(() => col.doc(it.id).set(prev)); status('Cambios guardados'); } catch (e) { status('No se ha podido guardar (' + (e.message || e.code) + ')'); }
+};
+// forma de una casa del Catastro: se guarda aparte (colección 'forma') y se puede volver a la original
+$('shapeCancel').onclick = () => { sel = null; $('shapeBar').hidden = true; draw(); };
+$('shapeSave').onclick = async () => {
+  const s = sel; if (!s?.cat || !colShape) return; const k = docId(keyOf(s.cat)), prev = shaped.get(k)?.raw || null;
+  const v = { id: s.cat.id, cx: s.cat.c[0], cz: s.cat.c[1], xy: s.item.p.flatMap(q => [Math.round(q[0] * 10) / 10, Math.round(q[1] * 10) / 10]), at: Date.now() };
+  sel = null; $('shapeBar').hidden = true; status('Guardando…');
+  try { await colShape.doc(k).set(v); push(() => prev ? colShape.doc(k).set(prev) : colShape.doc(k).delete()); status('Forma de la casa guardada'); } catch (e) { status('No se ha podido guardar (' + (e.message || e.code) + ')'); }
+  draw();
+};
+$('shapeOrig').onclick = async () => {
+  const s = sel; if (!s?.cat || !colShape) return; const k = docId(keyOf(s.cat)), prev = shaped.get(k)?.raw; if (!prev) return;
+  sel = null; $('shapeBar').hidden = true;
+  try { await colShape.doc(k).delete(); push(() => colShape.doc(k).set(prev)); status('La casa vuelve a su forma del Catastro'); } catch (e) { status('No se ha podido guardar (' + (e.message || e.code) + ')'); }
+  draw();
 };
 function ask(text, yes) { $('confirmTxt').textContent = text; $('bYes').textContent = yes; $('confirm').hidden = false; draw(); }
 // un dedo pone puntos o arrastra el plano; dos dedos acercan
 const ptrs = new Map(); let drag = null, pinch = null;
 cv.addEventListener('pointerdown', e => {
   cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.offsetX, e.offsetY]);
-  if (ptrs.size === 1) drag = { x: e.offsetX, y: e.offsetY, cx: view.cx, cz: view.cz, ox: off[0], oz: off[1], moved: false };
+  if (ptrs.size === 1) {
+    drag = { x: e.offsetX, y: e.offsetY, cx: view.cx, cz: view.cz, ox: off[0], oz: off[1], moved: false };
+    // ¿se ha cogido un punto? (del trazo que se dibuja o de lo que se edita)
+    const arrs = [cur, editPts() ? sel.item.p : null].filter(Boolean);
+    for (const arr of arrs) arr.forEach((q, i) => { const [a, b] = toS(q[0], q[1]); if (!drag.pt && Math.hypot(a - e.offsetX, b - e.offsetY) < 16) drag.pt = { arr, i, orig: q.slice() }; });
+  }
   else if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), s: view.s }; drag = null; }
 });
 cv.addEventListener('pointermove', e => {
@@ -154,9 +194,10 @@ cv.addEventListener('pointermove', e => {
     view.s = Math.min(12, Math.max(0.6, pinch.s * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d));
     const w1 = toW(...mid); view.cx += w0[0] - w1[0]; view.cz += w0[1] - w1[1]; draw(); return;
   }
-  if (drag) { const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y; if (Math.hypot(dx, dy) > 7) drag.moved = true; if (drag.moved) { if (mode === 'photo') { off = [drag.ox + dx / view.s, drag.oz + dy / view.s]; showOff(); } else { view.cx = drag.cx - dx / view.s; view.cz = drag.cz - dy / view.s; } draw(); } }
+  if (drag) { const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y; if (Math.hypot(dx, dy) > 7) drag.moved = true; if (drag.moved) { if (drag.pt) { drag.pt.arr[drag.pt.i] = toW(e.offsetX, e.offsetY); } else if (mode === 'photo') { off = [drag.ox + dx / view.s, drag.oz + dy / view.s]; showOff(); } else { view.cx = drag.cx - dx / view.s; view.cz = drag.cz - dy / view.s; } draw(); } }
 });
-cv.addEventListener('pointerup', e => { const d = drag; ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (d && !d.moved && ptrs.size === 0) tap(e.offsetX, e.offsetY); drag = null; });
+cv.addEventListener('pointerup', e => { const d = drag; ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (d?.pt && d.moved) { const { arr, i, orig } = d.pt; push(() => { arr[i] = orig; }, () => arr === cur || (sel?.item && arr === sel.item.p)); draw(); }
+  else if (d && !d.moved && ptrs.size === 0 && !d.pt) tap(e.offsetX, e.offsetY); drag = null; });
 cv.addEventListener('pointercancel', e => { ptrs.delete(e.pointerId); drag = null; pinch = null; });
 cv.addEventListener('wheel', e => {
   e.preventDefault(); const w0 = toW(e.offsetX, e.offsetY);
@@ -173,9 +214,17 @@ function tap(px, py) {
       if (d < bd) { bd = d; best = w; }
     }
     if (!best || !colWallGone) return; const k = wkey(best), was = wallGone.has(k);
-    (was ? colWallGone.doc(k).delete() : colWallGone.doc(k).set({ x0: best.p[0][0], z0: best.p[0][1], x1: best.p[best.p.length - 1][0], z1: best.p[best.p.length - 1][1], at: Date.now() }))
+    const v = { x0: best.p[0][0], z0: best.p[0][1], x1: best.p[best.p.length - 1][0], z1: best.p[best.p.length - 1][1], at: Date.now() };
+    push(() => was ? colWallGone.doc(k).set(v) : colWallGone.doc(k).delete());
+    (was ? colWallGone.doc(k).delete() : colWallGone.doc(k).set(v))
       .then(() => status(was ? 'La tapia vuelve a estar' : 'Tapia quitada'), e => status('No se ha podido guardar (' + (e.message || e.code) + ')'));
     return;
+  }
+  if (mode === 'shape') { // casa del Catastro: se cogen sus esquinas y se arrastran
+    const b = DATA.b.find(b => !gone.has(docId(keyOf(b))) && inside([x, z], shaped.get(docId(keyOf(b)))?.p || b.p));
+    if (!b) { sel = null; $('shapeBar').hidden = true; draw(); return; }
+    const k = docId(keyOf(b)), p0 = (shaped.get(k)?.p || b.p).map(q => q.slice());
+    sel = { cat: b, item: { p: p0.map(q => q.slice()) }, orig: p0 }; $('shapeOrig').disabled = !shaped.has(k); $('shapeBar').hidden = false; status('Arrastra las esquinas azules y pulsa Guardar forma'); draw(); return;
   }
   if (mode === 'gone') { // casa del Catastro bajo el dedo
     const b = DATA.b.find(b => inside([x, z], b.p));
@@ -194,7 +243,7 @@ function tap(px, py) {
     return;
   }
   if (Math.abs(x) > B || Math.abs(z) > B) return;
-  cur.push([x, z]); draw();
+  const arr = cur; cur.push([x, z]); push(() => { arr.pop(); }, () => cur === arr && arr.length > 0); draw();
 }
 addEventListener('resize', resize); resize();
 // todo se guarda para que Claude lo lea y lo ponga en el juego
@@ -213,5 +262,7 @@ addEventListener('resize', resize); resize();
   colWallGone.onSnapshot(snap => { wallGone = new Map(snap.docs.map(d => [d.id, d.data()])); draw(); }, () => {});
   db.collection('ajuste').doc('tapias').onSnapshot(d => { noAuto = !!(d.exists && d.data().todas); $('noAuto').checked = noAuto; draw(); }, () => {});
   $('noAuto').onchange = e => { noAuto = e.target.checked; draw(); db.collection('ajuste').doc('tapias').set({ todas: noAuto, at: Date.now() }).then(() => status(noAuto ? 'Se quitan todas las tapias del juego' : 'Vuelven las tapias del juego'), er => status('No se ha podido guardar (' + (er.message || er.code) + ')')); };
+  colShape = db.collection('forma');
+  colShape.onSnapshot(snap => { shaped = new Map(snap.docs.map(d => { const v = d.data(), xy = v.xy || [], p = []; for (let i = 0; i + 1 < xy.length; i += 2) p.push([xy[i], xy[i + 1]]); return [d.id, { p, raw: v }]; })); draw(); }, () => {});
   colGone.onSnapshot(snap => { gone = new Map(snap.docs.map(d => [d.id, d.data()])); draw(); }, () => {});
 })();

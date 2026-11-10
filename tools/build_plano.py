@@ -14,6 +14,7 @@ tr = sorted(docs('trazos'), key=lambda d: d.get('at', 0))
 out = {
     'foto': {k: foto.get(k, d) for k, d in (('dx', 0), ('dz', 0), ('scale', 1), ('rot', 0))},
     'quitar': [{'id': d['id'], 'c': [d['cx'], d['cz']]} for d in docs('quitar')],
+    'formas': [{'id': d['id'], 'c': [d['cx'], d['cz']], 'xy': d['xy']} for d in docs('forma')],
     'lineas': lines + [{'kind': d['kind'], 'xy': d['xy'], 'mat': d.get('mat', 'piedra'), 'alto': d.get('alto', 'media')} for d in tr if d['kind'] in ('wall', 'ruin')],
     'rocas': [{'xy': d['xy'], 'alto': d.get('alto', 'media')} for d in tr if d['kind'] == 'rocks'],
     'edificios': [{'xy': d['xy'], 'f': d.get('floors') or 1} for d in tr if d['kind'] == 'building'],

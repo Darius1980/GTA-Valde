@@ -968,6 +968,8 @@ export function applyPlano(data, plano) {
   for (const o of [data.ortho.full, data.ortho.center]) { const b = o.bounds; o.bounds = [dx + b[0] * s, dz + b[1] * s, dx + b[2] * s, dz + b[3] * s]; }
   const cen = (p) => [p.reduce((a, q) => a + q[0], 0) / p.length, p.reduce((a, q) => a + q[1], 0) / p.length];
   data.buildings = data.buildings.filter(b => !(plano.quitar || []).some(q => q.id === b.id && Math.hypot(...cen(b.p).map((v, i) => v - q.c[i])) < 1.5));
+  // casas del Catastro a las que Darío les cambió la forma tirando de sus esquinas
+  for (const fm of plano.formas || []) { const b = data.buildings.find(b => b.id === fm.id && Math.hypot(...cen(b.p).map((v, i) => v - fm.c[i])) < 1.5); if (b) { const p = pairs(fm.xy); if (p.length >= 3) b.p = p; } }
   const nuevos = (plano.edificios || []).map((e, i) => ({ p: pairs(e.xy), f: e.f || 1, id: 'plano' + i })).filter(b => b.p.length >= 3);
   data.buildings.push(...nuevos);
   // árboles: fuera de los claros, de las casas nuevas y de las tapias dibujadas
