@@ -36,9 +36,9 @@ button.go { background: var(--fg); color: var(--panel); border-color: var(--fg);
 button:disabled { opacity: 0.45; cursor: default; }
 .sep { width: 1px; align-self: stretch; background: var(--line); }
 #status { color: var(--muted); font-size: 13.5px; margin-left: auto; min-width: 0; }
-#confirm { display: flex; gap: 8px; align-items: center; } #confirm[hidden] { display: none; }
+#confirm { display: flex; gap: 8px; align-items: center; } #confirm[hidden], #edit[hidden] { display: none; } #edit { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 </style>
-<header><h1>Tapias, ruinas y casas de Val de Santa María</h1><details id="howto"><summary>Cómo se usa</summary><p>Tapia o Ruina: toca punto a punto de la esquina de una casa a la de la siguiente y pulsa Guardar. Edificio: toca sus esquinas y pulsa Guardar. Elige si es de piedra o de bloques y si es baja, media o alta. Quitar casa: toca una casa que no existe y desaparece (en ese modo se ve su contorno por si quieres recuperarla). Rocas: dibuja el contorno de un berrocal o una formación de piedras y elige baja, media o alta. Empezar de cero borra todo lo que has dibujado y quitado. Quitar tapia del juego: toca una tapia blanca discontinua que sobra (otro toque la recupera), o marca en la leyenda quitarlas todas. Poner árboles / Quitar árboles: dibuja el contorno de la zona tocando sus esquinas y pulsa Guardar zona. Mover foto: arrastra la foto o usa las flechas; ＋ y － cambian su tamaño y ⟲ ⟳ la giran. Cuando encaje con las casas, pulsa Guardar ajuste. Arrastra para moverte; pellizca o usa la rueda para acercar.</p></details></header>
+<header><h1>Tapias, ruinas y casas de Val de Santa María</h1><details id="howto"><summary>Cómo se usa</summary><p>Tapia o Ruina: toca punto a punto de la esquina de una casa a la de la siguiente y pulsa Guardar. Edificio: toca sus esquinas y pulsa Guardar. Elige si es de piedra o de bloques y si es baja, media o alta. Quitar casa: toca una casa que no existe y desaparece (en ese modo se ve su contorno por si quieres recuperarla). Rocas: dibuja el contorno de un berrocal o una formación de piedras y elige baja, media o alta. Editar lo mío: toca algo que hayas dibujado y cambia su tipo, material, altura o plantas (Guardar cambios), o bórralo. Empezar de cero borra todo lo que has dibujado y quitado. Quitar tapia del juego: toca una tapia blanca discontinua que sobra (otro toque la recupera), o marca en la leyenda quitarlas todas. Poner árboles / Quitar árboles: dibuja el contorno de la zona tocando sus esquinas y pulsa Guardar zona. Mover foto: arrastra la foto o usa las flechas; ＋ y － cambian su tamaño y ⟲ ⟳ la giran. Cuando encaje con las casas, pulsa Guardar ajuste. Arrastra para moverte; pellizca o usa la rueda para acercar.</p></details></header>
 <div id="map"><canvas id="cv"></canvas>
   <details id="hud" open><summary>Leyenda</summary><div class="hudin">
     <span><span class="key" style="background:var(--wall)"></span>Tapia de piedra (tuya)</span>
@@ -65,7 +65,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   <button id="bTree" aria-pressed="false">Poner árboles</button>
   <button id="bUntree" aria-pressed="false">Quitar árboles</button>
   <button id="bUnwall" aria-pressed="false">Quitar tapia del juego</button>
-  <button id="bDel" aria-pressed="false">Borrar lo mío</button>
+  <button id="bDel" aria-pressed="false">Editar lo mío</button>
   <button id="bPhoto" aria-pressed="false">Mover foto</button>
   <button id="bReset">Empezar de cero</button>
   <span id="nudge" hidden><button id="nW" aria-label="Foto a la izquierda">←</button><button id="nN" aria-label="Foto arriba">↑</button><button id="nS" aria-label="Foto abajo">↓</button><button id="nE" aria-label="Foto a la derecha">→</button><button id="zIn" aria-label="Foto más grande">＋</button><button id="zOut" aria-label="Foto más pequeña">－</button><button id="rL" aria-label="Girar la foto a la izquierda">⟲</button><button id="rR" aria-label="Girar la foto a la derecha">⟳</button><span id="offTxt">sin mover</span><button id="bPhotoSave" class="go">Guardar ajuste</button></span>
@@ -73,5 +73,6 @@ button:disabled { opacity: 0.45; cursor: default; }
   <button id="bUndo" disabled>Quitar último punto</button>
   <button id="bSave" class="go" disabled>Guardar</button>
   <span id="confirm" hidden><span id="confirmTxt">¿Borrar esta línea?</span><button id="bYes">Sí, borrar</button><button id="bNo">No</button></span>
+  <span id="edit" hidden><select id="eKind" aria-label="Tipo"></select><select id="eMat" aria-label="Material"><option value="piedra">De piedra</option><option value="bloque">De bloques</option></select><select id="eHigh" aria-label="Altura"><option value="baja">Baja</option><option value="media">Media</option><option value="alta">Alta</option></select><select id="eFloors" aria-label="Plantas"><option value="1">1 planta</option><option value="2">2 plantas</option><option value="3">3 plantas</option></select><button id="eSave" class="go">Guardar cambios</button><button id="eDel">Borrar</button><button id="eCancel">Cancelar</button></span>
   <span id="status">Conectando…</span>
 </footer>

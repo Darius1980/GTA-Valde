@@ -76,7 +76,7 @@ function setMode(m) {
   mode = m; for (const [id, k] of [['bWall', 'wall'], ['bRuin', 'ruin'], ['bBld', 'bld'], ['bGone', 'gone'], ['bDel', 'del'], ['bPhoto', 'photo'], ['bTree', 'tree'], ['bUntree', 'untree'], ['bUnwall', 'unwall'], ['bRock', 'rock']]) $(id).setAttribute('aria-pressed', String(k === m));
   $('nudge').hidden = m !== 'photo';
   $('floors').hidden = m !== 'bld'; $('wmat').hidden = m !== 'wall'; $('whigh').hidden = !['wall', 'ruin', 'rock'].includes(m);
-  if (!drawing()) cur = []; sel = null; $('confirm').hidden = true; draw();
+  if (!drawing()) cur = []; sel = null; $('confirm').hidden = true; $('edit').hidden = true; draw();
 }
 for (const [id, k] of [['bWall', 'wall'], ['bRuin', 'ruin'], ['bBld', 'bld'], ['bGone', 'gone'], ['bDel', 'del'], ['bPhoto', 'photo'], ['bTree', 'tree'], ['bUntree', 'untree'], ['bUnwall', 'unwall'], ['bRock', 'rock']]) $(id).onclick = () => setMode(k);
 // ajuste de la foto: flechas de 25 cm (norte arriba) y arrastre
@@ -117,6 +117,28 @@ async function resetAll() {
   const r = await Promise.allSettled(jobs), bad = r.filter(x => x.status === 'rejected').length;
   cur = []; draw(); status(bad ? `Quedan ${bad} cosas sin borrar: vuelve a pulsar Empezar de cero` : 'Plano limpio: empieza de cero');
 }
+// panel de edición de lo mío: cambiar tipo, material, altura o plantas, o borrarlo
+const KINDS = { wall: 'Tapia', ruin: 'Ruina', building: 'Edificio', rocks: 'Rocas', grove: 'Zona de árboles', clear: 'Zona sin árboles' };
+function openEdit(it) {
+  const line = it.kind === 'wall' || it.kind === 'ruin';
+  $('eKind').innerHTML = (line ? ['wall', 'ruin'] : it.kind === 'grove' || it.kind === 'clear' ? ['grove', 'clear'] : [it.kind]).map(k => `<option value="${k}"${k === it.kind ? ' selected' : ''}>${KINDS[k]}</option>`).join('');
+  $('eMat').value = it.mat; $('eHigh').value = it.alto; $('eFloors').value = String(it.floors);
+  const upd = () => { const k = $('eKind').value; $('eMat').hidden = k !== 'wall'; $('eHigh').hidden = !['wall', 'ruin', 'rocks'].includes(k); $('eFloors').hidden = k !== 'building'; };
+  $('eKind').onchange = upd; upd(); $('edit').hidden = false; draw();
+}
+$('eCancel').onclick = () => { sel = null; $('edit').hidden = true; draw(); };
+$('eDel').onclick = () => { const it = sel?.item; if (!it) return; $('edit').hidden = true; ask('¿Borrar ' + (KINDS[it.kind] || 'esto').toLowerCase() + '?', 'Sí, borrar'); };
+$('eSave').onclick = async () => {
+  const it = sel?.item; if (!it || !col) return;
+  const k = $('eKind').value, doc = { ...it.raw, kind: k, at: Date.now() };
+  delete doc.mat; delete doc.alto; delete doc.floors;
+  if (k === 'wall') { doc.mat = $('eMat').value; doc.alto = $('eHigh').value; }
+  if (k === 'ruin') { doc.mat = 'piedra'; doc.alto = $('eHigh').value; }
+  if (k === 'rocks') doc.alto = $('eHigh').value;
+  if (k === 'building') doc.floors = +$('eFloors').value;
+  sel = null; $('edit').hidden = true; draw(); status('Guardando…');
+  try { await col.doc(it.id).set(doc); status('Cambios guardados'); } catch (e) { status('No se ha podido guardar (' + (e.message || e.code) + ')'); }
+};
 function ask(text, yes) { $('confirmTxt').textContent = text; $('bYes').textContent = yes; $('confirm').hidden = false; draw(); }
 // un dedo pone puntos o arrastra el plano; dos dedos acercan
 const ptrs = new Map(); let drag = null, pinch = null;
@@ -167,8 +189,8 @@ function tap(px, py) {
       const a = l.p[i], b = l.p[i + 1], dx = b[0] - a[0], dz = b[1] - a[1], L = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L)), d = Math.hypot(x - a[0] - dx * t, z - a[1] - dz * t);
       if (d < bd) { bd = d; best = l; }
     }
-    sel = best ? { item: best } : null;
-    if (best) ask(best.kind === 'ruin' ? '¿Borrar esta ruina?' : best.kind === 'building' ? '¿Borrar este edificio?' : best.kind === 'rocks' ? '¿Borrar estas rocas?' : best.kind === 'grove' || best.kind === 'clear' ? '¿Borrar esta zona de árboles?' : '¿Borrar esta tapia?', 'Sí, borrar'); else { $('confirm').hidden = true; draw(); }
+    sel = best ? { item: best } : null; $('confirm').hidden = true;
+    if (best) openEdit(best); else { $('edit').hidden = true; draw(); }
     return;
   }
   if (Math.abs(x) > B || Math.abs(z) > B) return;
@@ -183,7 +205,7 @@ addEventListener('resize', resize); resize();
   col = db.collection('trazos'); colGone = db.collection('quitar'); draw();
   col.onSnapshot(snap => {
     clearTimeout(t);
-    items = snap.docs.map(d => { const v = d.data(), xy = v.xy || [], p = []; for (let i = 0; i + 1 < xy.length; i += 2) p.push([xy[i], xy[i + 1]]); return { id: d.id, kind: v.kind, floors: v.floors || 2, mat: v.mat || 'piedra', alto: v.alto || 'media', p }; }).filter(l => l.p.length > 1);
+    items = snap.docs.map(d => { const v = d.data(), xy = v.xy || [], p = []; for (let i = 0; i + 1 < xy.length; i += 2) p.push([xy[i], xy[i + 1]]); return { id: d.id, raw: v, kind: v.kind, floors: v.floors || 2, mat: v.mat || 'piedra', alto: v.alto || 'media', p }; }).filter(l => l.p.length > 1);
     status('Todo guardado'); draw();
   }, e => { clearTimeout(t); status('No se pueden leer los trazos (' + (e.message || e.code) + ')'); });
   db.collection('ajuste').doc('foto').get().then(d => { if (d.exists) { const v = d.data(); off = [v.dx || 0, v.dz || 0]; fz = v.scale || 1; frot = v.rot || 0; offSaved = off.slice(); showOff(); draw(); } }).catch(() => {});
