@@ -55,11 +55,12 @@ function draw() {
       const c = it.p.reduce((a, q) => [a[0] + q[0] / it.p.length, a[1] + q[1] / it.p.length], [0, 0]), [a, b] = toS(c[0], c[1]); g.font = '700 12px system-ui'; g.fillStyle = '#fff'; g.textAlign = 'center'; g.fillText('▲ ' + it.alto, a, b + 4); g.textAlign = 'start'; continue; }
     if (it.kind === 'building') { path(it.p, true); g.fillStyle = 'rgba(155,107,214,0.45)'; g.fill(); g.lineWidth = hi ? 5 : 3; g.strokeStyle = hi ? '#4fc3f7' : C('--bld'); g.stroke();
       if (view.s > 1.2) { const c = it.p.reduce((a, q) => [a[0] + q[0] / it.p.length, a[1] + q[1] / it.p.length], [0, 0]), [a, b] = toS(c[0], c[1]); g.font = '700 12px system-ui'; g.fillStyle = '#fff'; g.textAlign = 'center'; g.fillText(it.floors + 'P', a, b + 4); g.textAlign = 'start'; } }
-    else { path(it.p); const wdt = { baja: 3, media: 5, alta: 8 }[it.alto] || 5; g.lineWidth = hi ? wdt + 4 : wdt; g.strokeStyle = hi ? '#4fc3f7' : (it.kind === 'ruin' ? C('--ruin') : it.mat === 'bloque' ? C('--block') : C('--wall')); g.stroke(); }
+    else { path(it.p); const wdt = { baja: 3, media: 5, alta: 8 }[it.alto] || 5; g.lineWidth = hi ? wdt + 4 : wdt; g.strokeStyle = hi ? '#4fc3f7' : (it.kind === 'ruin' ? C('--ruin') : it.mat === 'bloque' ? C('--block') : it.mat === 'irregular' ? C('--wallirr') : C('--wall'));
+      if (it.kind === 'wall' && it.mat === 'irregular') g.setLineDash([wdt * 2.2, wdt * 0.9]); g.stroke(); g.setLineDash([]); }
   }
   if (editPts()) for (const q of sel.item.p) { const [a, b] = toS(q[0], q[1]); g.beginPath(); g.arc(a, b, 6, 0, 7); g.fillStyle = '#4fc3f7'; g.fill(); g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke(); }
   if (cur.length) {
-    const cc = mode === 'wall' && $('wmat').value === 'bloque' ? C('--block') : mode === 'ruin' ? C('--ruin') : mode === 'bld' ? C('--bld') : mode === 'tree' ? C('--tree') : mode === 'untree' ? C('--gone') : mode === 'rock' ? C('--rock') : C('--wall');
+    const cc = mode === 'wall' && $('wmat').value === 'bloque' ? C('--block') : mode === 'wall' && $('wmat').value === 'irregular' ? C('--wallirr') : mode === 'ruin' ? C('--ruin') : mode === 'bld' ? C('--bld') : mode === 'tree' ? C('--tree') : mode === 'untree' ? C('--gone') : mode === 'rock' ? C('--rock') : C('--wall');
     path(cur, area() && cur.length > 2); if (area() && cur.length > 2) { g.fillStyle = 'rgba(155,155,155,0.3)'; g.fill(); }
     g.lineWidth = area() ? 3 : 5; g.strokeStyle = cc; g.stroke();
     for (const q of cur) { const [a, b] = toS(q[0], q[1]); g.beginPath(); g.arc(a, b, 5, 0, 7); g.fillStyle = '#fff'; g.fill(); g.lineWidth = 2; g.strokeStyle = '#000'; g.stroke(); }

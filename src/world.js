@@ -539,7 +539,7 @@ export function buildRoads(data, terrain, tex, colliders) {
   }
   const group = new THREE.Group();
   const mats = {
-    asphalt: new THREE.MeshStandardMaterial({ map: tex.asphalt, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2 }),
+    asphalt: new THREE.MeshStandardMaterial({ map: tex.asphalt, roughness: 1, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2 }), // mate: con 0,95 brillaba al sol como plástico
     concrete: new THREE.MeshStandardMaterial({ map: tex.concrete, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2 }),
     dirt: new THREE.MeshStandardMaterial({ map: tex.dirt, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, transparent: true, opacity: 0.85 }),
     sidewalk: new THREE.MeshStandardMaterial({ map: tex.sidewalk, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -1 }),
@@ -854,7 +854,7 @@ export function terrainMaterial(orthoFull, orthoCenter, fb, cb, tex, mask = null
         // fuera de la calle, dentro del pueblo: tierra (la ortofoto de cerca es una mancha)
         float vf = 1.0 - smoothstep(200.0, 290.0, length(vWPos.xz - maskB.xy - maskB.zw * 0.5));
         vec3 dirt = texture2D(tDirt, vWPos.xz / 3.0).rgb;
-        col.rgb = mix(col.rgb, col.rgb * 0.45 + dirt * 0.65, 0.7 * vf * (1.0 - a));
+        col.rgb = mix(col.rgb, mix(col.rgb, dirt, 0.8) * (0.8 + 0.25 * d), 0.95 * vf * (1.0 - a)); // todo lo que no es calle, tierra (lo pidió Darío: el gris de la foto confundía)
         col.rgb = mix(col.rgb, asph, a);
       }` : ''}
       diffuseColor *= col;`);
@@ -899,7 +899,7 @@ export function villageMask(data, center, R = 320, size = 1024) {
   for (const pass of [0, 1]) for (const r of data.roads) {
     if (r.k === 'track' || r.k === 'path' || r.k === 'trunk') continue;
     if (pass !== (conc(r) ? 0 : 1)) continue;
-    g.strokeStyle = pass ? '#ff0' : '#f00'; g.lineWidth = (r.w + (pass ? 4 : 5)) * s; g.beginPath();
+    g.strokeStyle = pass ? '#ff0' : '#f00'; g.lineWidth = (r.w + 0.6) * s; // solo la calle: lo de al lado es tierra (Darío) g.beginPath();
     r.p.forEach((p, i) => i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))); g.stroke();
   }
   // solo dentro del casco urbano: se desvanece hacia las afueras
@@ -994,11 +994,12 @@ export function planoWalls(plano) {
   let seed = 23; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   return (plano.lineas || []).map(l => {
     const P = pairs(l.xy); if (P.length < 2) return null;
-    const ruin = l.kind === 'ruin', p = densify(P, ruin ? 1 : 2), bloque = l.mat === 'bloque';
+    const ruin = l.kind === 'ruin', bloque = l.mat === 'bloque', irr = l.mat === 'irregular', p = densify(P, ruin || irr ? 1 : 2);
     // altura elegida en el plano: baja, media (la de antes) o alta
     const H = ruin ? { baja: 1.4, media: 2.6, alta: 3.8 } : { baja: 0.8, media: 1.3, alta: 2.1 }, h0 = H[l.alto] || H.media;
     const base = h0 * (ruin ? 0.85 + rnd() * 0.3 : 0.92 + rnd() * 0.16);
-    return { p, hs: p.map(() => ruin ? base * (0.45 + rnd() * 0.65) : bloque ? base : base + (rnd() - 0.5) * 0.1), ruin, mat: bloque ? 'bloque' : 'piedra' };
+    // regular: remate recto; irregular: piedra seca amontonada, con el remate desigual
+    return { p, hs: p.map(() => ruin ? base * (0.45 + rnd() * 0.65) : irr ? base * (0.72 + rnd() * 0.5) : base), ruin: ruin || irr, mat: bloque ? 'bloque' : 'piedra' };
   }).filter(Boolean);
 }
 
@@ -1022,14 +1023,14 @@ export function buildRocks(plano, terrain, tex, colliders) {
   const geo = new THREE.IcosahedronGeometry(1, 2), pa = geo.attributes.position, v = new THREE.Vector3();
   for (let i = 0; i < pa.count; i++) { v.fromBufferAttribute(pa, i); const n = 0.82 + 0.18 * Math.sin(v.x * 3.1 + v.z * 2.3) * Math.cos(v.y * 2.7 - v.x); v.multiplyScalar(n); pa.setXYZ(i, v.x, v.y * 0.72, v.z); }
   geo.computeVertexNormals();
-  const mat = new THREE.MeshStandardMaterial({ map: tex.stone, color: 0xb9b2a6, roughness: 0.95, flatShading: true });
+  const mat = new THREE.MeshStandardMaterial({ map: tex.granite || tex.stone, color: 0xffffff, roughness: 1, flatShading: true });
   const im = new THREE.InstancedMesh(geo, mat, list.length); im.castShadow = im.receiveShadow = true;
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), sc = new THREE.Vector3(), p = new THREE.Vector3(), col = new THREE.Color();
   list.forEach(([x, z, r], i) => {
     e.set((rnd() - 0.5) * 0.5, rnd() * 6.28, (rnd() - 0.5) * 0.5); q.setFromEuler(e);
     sc.set(r * (0.9 + rnd() * 0.4), r * (0.7 + rnd() * 0.4), r * (0.9 + rnd() * 0.4));
     p.set(x, terrain.height(x, z) - r * 0.25, z); m.compose(p, q, sc); im.setMatrixAt(i, m);
-    const k = 0.85 + rnd() * 0.2; col.setRGB(k, k * (0.98 + rnd() * 0.03), k * 0.95); im.setColorAt(i, col);
+    const k = 0.62 + rnd() * 0.22; col.setRGB(k, k, k * (0.97 + rnd() * 0.04)); im.setColorAt(i, col); // gris, cada bolo un poco distinto
     const cr = r * 0.85; colliders.addSegment(x - cr, z, x + cr, z, 'wall'); colliders.addSegment(x, z - cr, x, z + cr, 'wall');
   });
   group.add(im); return group;

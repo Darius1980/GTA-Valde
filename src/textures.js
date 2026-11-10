@@ -151,6 +151,15 @@ export function makeTextures(renderer) {
     }
     out.block = tex(c);
   }
+  // Granito gris de los berrocales: moteado de cuarzo, feldespato y mica, con líquenes
+  {
+    const [c, g] = canvas(256, 256); const r = rng(21);
+    g.fillStyle = '#8b8a86'; g.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 9; i++) { g.fillStyle = r() < 0.5 ? 'rgba(60,60,58,0.15)' : 'rgba(200,198,190,0.12)'; g.beginPath(); g.arc(r() * 256, r() * 256, 20 + r() * 60, 0, 7); g.fill(); }
+    for (let i = 0; i < 9000; i++) { const k = r(), v = k < 0.15 ? 40 + r() * 30 : k < 0.45 ? 190 + r() * 50 : 110 + r() * 50; g.fillStyle = `rgba(${v | 0},${v | 0},${(v - 3) | 0},0.7)`; g.fillRect(r() * 256, r() * 256, 1 + r() * 2.5, 1 + r() * 2.5); }
+    for (let i = 0; i < 14; i++) { g.fillStyle = r() < 0.6 ? 'rgba(190,185,120,0.25)' : 'rgba(230,230,220,0.25)'; g.beginPath(); g.arc(r() * 256, r() * 256, 3 + r() * 10, 0, 7); g.fill(); }
+    out.granite = tex(c);
+  }
   // Teja árabe
   {
     const [c, g] = canvas(256, 256); const r = rng(5);
@@ -171,9 +180,9 @@ export function makeTextures(renderer) {
   {
     const [c, g] = canvas(256, 256); const r = rng(9);
     // asfalto viejo de pueblo: gris claro, con árido a la vista y parches más oscuros (Street View)
-    g.fillStyle = '#6f6e6a'; g.fillRect(0, 0, 256, 256);
+    g.fillStyle = '#5e5d59'; g.fillRect(0, 0, 256, 256);
     for (let i = 0; i < 5; i++) { g.fillStyle = r() < 0.5 ? 'rgba(40,40,42,0.18)' : 'rgba(160,150,135,0.12)'; const x = r() * 256, y = r() * 256; g.fillRect(x, y, 30 + r() * 80, 20 + r() * 60); }
-    for (let i = 0; i < 11000; i++) { const v = 70 + r() * 90 | 0; g.fillStyle = `rgba(${v + 4},${v},${v - 4},0.5)`; g.fillRect(r() * 256, r() * 256, 1 + r() * 2, 1 + r() * 2); }
+    for (let i = 0; i < 11000; i++) { const v = 60 + r() * 75 | 0; g.fillStyle = `rgba(${v + 4},${v},${v - 4},0.5)`; g.fillRect(r() * 256, r() * 256, 1 + r() * 2, 1 + r() * 2); }
     for (let i = 0; i < 6; i++) { g.strokeStyle = 'rgba(25,25,25,0.4)'; g.lineWidth = 1; g.beginPath(); let x = r() * 256, y = r() * 256; g.moveTo(x, y); for (let k = 0; k < 6; k++) { x += (r() - .5) * 40; y += (r() - .5) * 40; g.lineTo(x, y); } g.stroke(); }
     out.asphalt = tex(c);
   }
@@ -267,7 +276,7 @@ export function makeTextures(renderer) {
   // Cubierta plana (tela asfáltica / grava)
   {
     const [c, g] = canvas(256, 256); const r = rng(41);
-    g.fillStyle = '#6f6e6a'; g.fillRect(0, 0, 256, 256);
+    g.fillStyle = '#5e5d59'; g.fillRect(0, 0, 256, 256);
     for (let i = 0; i < 9000; i++) { const v = 80 + r() * 70 | 0; g.fillStyle = `rgba(${v},${v},${v - 4},0.5)`; g.fillRect(r() * 256, r() * 256, 2, 2); }
     out.flatRoof = tex(c);
   }
