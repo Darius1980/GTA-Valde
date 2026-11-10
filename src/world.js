@@ -717,8 +717,9 @@ export function yardWalls(data, colliders, avoid = []) {
   return out;
 }
 export function buildWalls(data, terrain, tex, colliders) {
-  const gb = new GeoBuilder();
+  const gStone = new GeoBuilder(), gBlock = new GeoBuilder();
   for (const w of data.walls) {
+    const gb = w.mat === 'bloque' ? gBlock : gStone;
     const P = w.hs ? w.p : densify(w.p, 2), t = w.ruin ? 0.3 : 0.25; let dist = 0;
     const H = (i) => w.hs ? w.hs[i] : w.h || 1.2;
     for (let i = 0; i < P.length - 1; i++) {
@@ -740,8 +741,13 @@ export function buildWalls(data, terrain, tex, colliders) {
       dist += L;
     }
   }
-  const m = new THREE.Mesh(gb.build(), new THREE.MeshStandardMaterial({ map: tex.stone, roughness: 1, side: THREE.DoubleSide }));
-  m.castShadow = m.receiveShadow = true; return m;
+  const out = new THREE.Group();
+  for (const [gb, map] of [[gStone, tex.stone], [gBlock, tex.block || tex.stone]]) {
+    if (!gb.pos.length) continue;
+    const m = new THREE.Mesh(gb.build(), new THREE.MeshStandardMaterial({ map, roughness: 1, side: THREE.DoubleSide }));
+    m.castShadow = m.receiveShadow = true; out.add(m);
+  }
+  return out;
 }
 
 // ---------- árboles (encinas y robles) instanciados con dos niveles de detalle ----------
@@ -965,7 +971,7 @@ export function applyPlano(data, plano) {
   const nuevos = (plano.edificios || []).map((e, i) => ({ p: pairs(e.xy), f: e.f || 1, id: 'plano' + i })).filter(b => b.p.length >= 3);
   data.buildings.push(...nuevos);
   // árboles: fuera de los claros, de las casas nuevas y de las tapias dibujadas
-  const lines = (plano.lineas || []).map(l => pairs(l.xy)), claros = (plano.claros || []).map(pairs);
+  const lines = (plano.lineas || []).map(l => pairs(l.xy)), claros = [...(plano.claros || []), ...(plano.rocas || []).map(r => r.xy)].map(pairs);
   const blocked = (x, z) => claros.some(P => ptInPoly(x, z, P)) || nuevos.some(b => ptInPoly(x, z, b.p)) || lines.some(P => P.some((a, i) => i && segDist(x, z, P[i - 1], a) < 1.2));
   data.trees = data.trees.filter(([x, z]) => !blocked(x, z));
   // arboledas: se rellenan con encinas cada 5 m, sin pisar casas ni calles
@@ -986,8 +992,43 @@ export function planoWalls(plano) {
   let seed = 23; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   return (plano.lineas || []).map(l => {
     const P = pairs(l.xy); if (P.length < 2) return null;
-    const ruin = l.kind === 'ruin', p = densify(P, ruin ? 1 : 2);
-    const base = ruin ? 2.2 + rnd() * 0.8 : 1.15 + rnd() * 0.35;
-    return { p, hs: p.map(() => ruin ? base * (0.45 + rnd() * 0.65) : base + (rnd() - 0.5) * 0.1), ruin };
+    const ruin = l.kind === 'ruin', p = densify(P, ruin ? 1 : 2), bloque = l.mat === 'bloque';
+    // altura elegida en el plano: baja, media (la de antes) o alta
+    const H = ruin ? { baja: 1.4, media: 2.6, alta: 3.8 } : { baja: 0.8, media: 1.3, alta: 2.1 }, h0 = H[l.alto] || H.media;
+    const base = h0 * (ruin ? 0.85 + rnd() * 0.3 : 0.92 + rnd() * 0.16);
+    return { p, hs: p.map(() => ruin ? base * (0.45 + rnd() * 0.65) : bloque ? base : base + (rnd() - 0.5) * 0.1), ruin, mat: bloque ? 'bloque' : 'piedra' };
   }).filter(Boolean);
+}
+
+// Rocas naturales (berrocales de granito) en las zonas que Darío dibujó: bolos redondeados medio enterrados
+export function buildRocks(plano, terrain, tex, colliders) {
+  const zones = plano.rocas || [], group = new THREE.Group(); if (!zones.length) return group;
+  let seed = 31; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const list = [];
+  for (const z of zones) {
+    const P = pairs(z.xy); if (P.length < 3) continue;
+    const [r0, r1] = { baja: [0.5, 1.1], media: [0.9, 2.0], alta: [1.6, 3.4] }[z.alto] || [0.9, 2.0];
+    const xs = P.map(p => p[0]), zs = P.map(p => p[1]), SP = (r0 + r1) * 0.9;
+    for (let x = Math.min(...xs); x <= Math.max(...xs); x += SP) for (let y = Math.min(...zs); y <= Math.max(...zs); y += SP) {
+      const tx = x + (rnd() - 0.5) * SP, tz = y + (rnd() - 0.5) * SP;
+      if (!ptInPoly(tx, tz, P) || rnd() < 0.15) continue;
+      const r = r0 + (r1 - r0) * rnd() ** 1.5; list.push([tx, tz, r]);
+      if (rnd() < 0.35) { const a = rnd() * 6.28, rr = r * (0.35 + rnd() * 0.3); list.push([tx + Math.cos(a) * r * 0.9, tz + Math.sin(a) * r * 0.9, rr]); } // piedra pequeña al lado
+    }
+  }
+  // un bolo: icosaedro deformado, aplastado y con caras planas, como el granito erosionado
+  const geo = new THREE.IcosahedronGeometry(1, 2), pa = geo.attributes.position, v = new THREE.Vector3();
+  for (let i = 0; i < pa.count; i++) { v.fromBufferAttribute(pa, i); const n = 0.82 + 0.18 * Math.sin(v.x * 3.1 + v.z * 2.3) * Math.cos(v.y * 2.7 - v.x); v.multiplyScalar(n); pa.setXYZ(i, v.x, v.y * 0.72, v.z); }
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({ map: tex.stone, color: 0xb9b2a6, roughness: 0.95, flatShading: true });
+  const im = new THREE.InstancedMesh(geo, mat, list.length); im.castShadow = im.receiveShadow = true;
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), sc = new THREE.Vector3(), p = new THREE.Vector3(), col = new THREE.Color();
+  list.forEach(([x, z, r], i) => {
+    e.set((rnd() - 0.5) * 0.5, rnd() * 6.28, (rnd() - 0.5) * 0.5); q.setFromEuler(e);
+    sc.set(r * (0.9 + rnd() * 0.4), r * (0.7 + rnd() * 0.4), r * (0.9 + rnd() * 0.4));
+    p.set(x, terrain.height(x, z) - r * 0.25, z); m.compose(p, q, sc); im.setMatrixAt(i, m);
+    const k = 0.85 + rnd() * 0.2; col.setRGB(k, k * (0.98 + rnd() * 0.03), k * 0.95); im.setColorAt(i, col);
+    const cr = r * 0.85; colliders.addSegment(x - cr, z, x + cr, z, 'wall'); colliders.addSegment(x, z - cr, x, z + cr, 'wall');
+  });
+  group.add(im); return group;
 }

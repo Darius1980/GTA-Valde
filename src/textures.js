@@ -141,6 +141,16 @@ export function makeTextures(renderer) {
     drawStone(g, 512, 512, r, STONE);
     out.stone = tex(c);
   }
+  // Bloques de hormigón gris (tapias nuevas): 40 × 20 cm, la textura cubre 3 m
+  {
+    const [c, g] = canvas(512, 512); const r = rng(13), bw = 512 / 7.5, bh = bw / 2;
+    g.fillStyle = '#8d8c87'; g.fillRect(0, 0, 512, 512);
+    for (let y = 0, row = 0; y < 512; y += bh, row++) for (let x = (row % 2) * -bw / 2; x < 512; x += bw) {
+      const v = 150 + (r() - 0.5) * 24; g.fillStyle = `rgb(${v},${v - 2},${v - 6})`; g.fillRect(x + 2, y + 2, bw - 3, bh - 3);
+      for (let i = 0; i < 25; i++) { g.fillStyle = r() < 0.5 ? 'rgba(60,60,60,0.12)' : 'rgba(230,230,225,0.12)'; g.fillRect(x + 2 + r() * (bw - 4), y + 2 + r() * (bh - 4), 1 + r() * 2, 1 + r() * 2); }
+    }
+    out.block = tex(c);
+  }
   // Teja árabe
   {
     const [c, g] = canvas(256, 256); const r = rng(5);

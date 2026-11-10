@@ -3,7 +3,7 @@ import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { Input } from './input.js';
 import { makeTextures } from './textures.js';
 import { Plane, flattenAirfield, buildAirfield, onAirfield } from './plane.js';
-import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, buildPlaza, Trees, smoothRoads, villageMask, yardWalls, buildBridges, applyPlano, planoWalls } from './world.js';
+import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, buildPlaza, Trees, smoothRoads, villageMask, yardWalls, buildBridges, applyPlano, planoWalls, buildRocks } from './world.js';
 import { Animals } from './animals.js';
 import { Player } from './player.js';
 import { Car } from './car.js';
@@ -86,6 +86,7 @@ async function load(map) {
   if (plano) data.walls = planoWalls(plano); // las tapias y ruinas reales sustituyen a las automáticas
   else if (data.style !== 'urban' && !data.walls.length) data.walls = yardWalls(data, colliders, [sites.gas, sites.shop, sites.taller?.b].filter(Boolean));
   scene.add(buildWalls(data, terrain, tex, colliders));
+  if (plano) scene.add(buildRocks(plano, terrain, tex, colliders)); // berrocales dibujados en el plano
   const clearR = [[sites.gas, 13], [sites.shop, 15]].filter(([s]) => s);
   data.trees = data.trees.filter(([x, z]) => !clearR.some(([s, r]) => Math.hypot(x - s.x, z - s.z) < r) && !(airfield && onAirfield(airfield, x, z, 14)));
   const trees = new Trees(data, terrain, tex, colliders); scene.add(trees.group);

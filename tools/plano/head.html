@@ -1,0 +1,77 @@
+<title>Plano de tapias de Valde</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;700&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+/* Mapa a pantalla completa con una barra de herramientas abajo, como un plano de obra sobre la foto aérea */
+:root {
+  --bg: #f3f1ec; --panel: #fffdf8; --fg: #2a2620; --muted: #6d665b; --line: #d9d2c4;
+  --wall: #e8a33a; --block: #8fb3c9; --rock: #b8ad9c; --ruin: #c4462f; --bld: #9b6bd6; --gone: #ff3b30; --tree: #3fd16a; --game: #ffffff; --accent: #2f6f8f;
+  --display: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "Source Sans 3", system-ui, -apple-system, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #1b1a17; --panel: #262420; --fg: #eee8dc; --muted: #a59d8f; --line: #3d3a33; --accent: #6fb3d4; color-scheme: dark } }
+:root[data-theme="dark"] { --bg: #1b1a17; --panel: #262420; --fg: #eee8dc; --muted: #a59d8f; --line: #3d3a33; --accent: #6fb3d4; color-scheme: dark }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; display: flex; flex-direction: column; overflow: hidden; }
+header { padding-block: 10px 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; border-bottom: 1px solid var(--line); background: var(--panel); }
+h1 { font-family: var(--display); font-weight: 700; font-size: 20px; margin: 0; letter-spacing: 0.01em; }
+header p { margin: 0; color: var(--muted); font-size: 13.5px; min-width: 0; }
+#map { flex: 1; position: relative; min-height: 0; background: #444; touch-action: none; }
+canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+#hud { position: absolute; top: 10px; right: max(10px, env(safe-area-inset-right, 0px)); background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 13px; font-variant-numeric: tabular-nums; display: grid; gap: 3px; }
+#hud summary, #howto summary { cursor: pointer; font-weight: 600; } .hudin { display: grid; gap: 3px; margin-top: 4px; } #howto p { margin: 4px 0 0; }
+@media (max-width: 600px) { #hud { font-size: 12px; } }
+#hud label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.key { display: inline-block; width: 18px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+footer { padding-block: 8px; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); background: var(--panel); border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button { font-family: var(--display); font-weight: 500; font-size: 16px; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; min-height: 42px; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button[aria-pressed="true"] { border-color: var(--fg); box-shadow: inset 0 -3px 0 var(--sel, var(--fg)); }
+#bWall { --sel: var(--wall); } #bRuin { --sel: var(--ruin); } #bBld { --sel: var(--bld); } #bGone { --sel: var(--gone); } #bDel { --sel: var(--accent); } #bUnwall { --sel: var(--gone); } #bTree { --sel: var(--tree); } #bUntree { --sel: var(--gone); } #bPhoto { --sel: var(--accent); } #bRock { --sel: var(--rock); }
+#nudge { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; } #nudge[hidden] { display: none; } #offTxt { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 7em; }
+select[hidden] { display: none; }
+select { font-family: var(--display); font-size: 15px; min-height: 42px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); padding: 0 8px; }
+button.go { background: var(--fg); color: var(--panel); border-color: var(--fg); }
+button:disabled { opacity: 0.45; cursor: default; }
+.sep { width: 1px; align-self: stretch; background: var(--line); }
+#status { color: var(--muted); font-size: 13.5px; margin-left: auto; min-width: 0; }
+#confirm { display: flex; gap: 8px; align-items: center; } #confirm[hidden] { display: none; }
+</style>
+<header><h1>Tapias, ruinas y casas de Val de Santa María</h1><details id="howto"><summary>Cómo se usa</summary><p>Tapia o Ruina: toca punto a punto de la esquina de una casa a la de la siguiente y pulsa Guardar. Edificio: toca sus esquinas y pulsa Guardar. Elige si es de piedra o de bloques y si es baja, media o alta. Quitar casa: toca una casa que no existe y desaparece (en ese modo se ve su contorno por si quieres recuperarla). Rocas: dibuja el contorno de un berrocal o una formación de piedras y elige baja, media o alta. Empezar de cero borra todo lo que has dibujado y quitado. Quitar tapia del juego: toca una tapia blanca discontinua que sobra (otro toque la recupera), o marca en la leyenda quitarlas todas. Poner árboles / Quitar árboles: dibuja el contorno de la zona tocando sus esquinas y pulsa Guardar zona. Mover foto: arrastra la foto o usa las flechas; ＋ y － cambian su tamaño y ⟲ ⟳ la giran. Cuando encaje con las casas, pulsa Guardar ajuste. Arrastra para moverte; pellizca o usa la rueda para acercar.</p></details></header>
+<div id="map"><canvas id="cv"></canvas>
+  <details id="hud" open><summary>Leyenda</summary><div class="hudin">
+    <span><span class="key" style="background:var(--wall)"></span>Tapia de piedra (tuya)</span>
+    <span><span class="key" style="background:var(--block)"></span>Tapia de bloques (tuya) · más gruesa = más alta</span>
+    <span><span class="key" style="background:var(--ruin)"></span>Ruina (tuya)</span>
+    <span><span class="key" style="background:var(--bld)"></span>Edificio nuevo (tuyo)</span>
+    <span><span class="key" style="background:var(--gone)"></span>Árboles o tapias que se quitan</span>
+    <span><span class="key" style="background:var(--rock)"></span>Rocas naturales (tuyas)</span>
+    <span><span class="key" style="background:var(--tree)"></span>Zona de árboles nueva · <span style="color:#6fbf5a">●</span> árbol del juego</span>
+    <label><input type="checkbox" id="showGame" checked> <span class="key" style="background:repeating-linear-gradient(90deg,#fff 0 4px,transparent 4px 7px)"></span>Tapias que pone el juego ahora</label>
+    <label><input type="checkbox" id="noAuto"> Quitar todas las tapias del juego</label>
+    <span id="count">Nada dibujado aún</span>
+  </div></details>
+</div>
+<footer>
+  <button id="bWall" aria-pressed="true">Tapia</button>
+  <button id="bRuin" aria-pressed="false">Ruina</button>
+  <button id="bBld" aria-pressed="false">Edificio</button>
+  <select id="wmat" aria-label="Material de la tapia"><option value="piedra" selected>De piedra</option><option value="bloque">De bloques</option></select>
+  <select id="whigh" aria-label="Altura de la tapia o ruina"><option value="baja">Baja</option><option value="media" selected>Media</option><option value="alta">Alta</option></select>
+  <select id="floors" hidden aria-label="Plantas del edificio"><option value="1">1 planta</option><option value="2" selected>2 plantas</option><option value="3">3 plantas</option></select>
+  <button id="bGone" aria-pressed="false">Quitar casa</button>
+  <button id="bRock" aria-pressed="false">Rocas</button>
+  <button id="bTree" aria-pressed="false">Poner árboles</button>
+  <button id="bUntree" aria-pressed="false">Quitar árboles</button>
+  <button id="bUnwall" aria-pressed="false">Quitar tapia del juego</button>
+  <button id="bDel" aria-pressed="false">Borrar lo mío</button>
+  <button id="bPhoto" aria-pressed="false">Mover foto</button>
+  <button id="bReset">Empezar de cero</button>
+  <span id="nudge" hidden><button id="nW" aria-label="Foto a la izquierda">←</button><button id="nN" aria-label="Foto arriba">↑</button><button id="nS" aria-label="Foto abajo">↓</button><button id="nE" aria-label="Foto a la derecha">→</button><button id="zIn" aria-label="Foto más grande">＋</button><button id="zOut" aria-label="Foto más pequeña">－</button><button id="rL" aria-label="Girar la foto a la izquierda">⟲</button><button id="rR" aria-label="Girar la foto a la derecha">⟳</button><span id="offTxt">sin mover</span><button id="bPhotoSave" class="go">Guardar ajuste</button></span>
+  <span class="sep"></span>
+  <button id="bUndo" disabled>Quitar último punto</button>
+  <button id="bSave" class="go" disabled>Guardar</button>
+  <span id="confirm" hidden><span id="confirmTxt">¿Borrar esta línea?</span><button id="bYes">Sí, borrar</button><button id="bNo">No</button></span>
+  <span id="status">Conectando…</span>
+</footer>
