@@ -5,7 +5,8 @@ let view = { cx: -10, cz: 10, s: 2 }; // centro (m) y píxeles por metro
 // mode: wall | ruin | bld (dibujar) · gone (quitar casa del Catastro) · del (borrar algo mío)
 let shaped = new Map(), colShape = null, wallGone = new Map(), noAuto = false, colWallGone = null, trees = [], treeGone = new Map(), colTree = null, colTreeGone = null, off = [0, 0], offSaved = [0, 0], fz = 1, frot = 0, mode = 'wall', cur = [], items = [], gone = new Map(), sel = null, showGame = true, db = null, col = null, colGone = null;
 const hist = []; // pasos para deshacer: { undo(): void|Promise, alive?(): bool }
-const push = (undo, alive) => { hist.push({ undo, alive }); if (hist.length > 200) hist.shift(); };
+const redoSt = []; // lo deshecho, para rehacer (Ctrl+Y)
+const push = (undo, alive, redo) => { hist.push({ undo, alive, redo }); if (hist.length > 200) hist.shift(); redoSt.length = 0; };
 const newId = () => Array.from({ length: 20 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.random() * 36 | 0]).join('');
 const editPts = () => sel?.item && (!$('edit').hidden || !$('shapeBar').hidden);
 const $ = id => document.getElementById(id), status = t => { $('status').textContent = t; };
@@ -75,7 +76,7 @@ function draw() {
   if (gone.size) parts.push(gone.size + (gone.size === 1 ? ' casa quitada' : ' casas quitadas'));
   parts.push(...parts0);
   $('count').textContent = parts.length ? parts.join(' · ') : 'Nada dibujado aún';
-  $('bUndo').disabled = !hist.some(h => !h.alive || h.alive()); $('bSave').disabled = !col || cur.length < (area() ? 3 : 2);
+  $('bUndo').disabled = !hist.some(h => !h.alive || h.alive()); $('bRedo').disabled = !redoSt.length; $('bSave').disabled = !col || cur.length < (area() ? 3 : 2);
   $('bSave').textContent = mode === 'bld' ? 'Guardar edificio' : area() ? 'Guardar zona' : 'Guardar línea';
 }
 function setMode(m) {
@@ -98,13 +99,23 @@ $('bPhotoSave').onclick = async () => {
 async function undo() {
   while (hist.length) {
     const h = hist.pop(); if (h.alive && !h.alive()) continue;
-    try { await h.undo(); status('Deshecho'); } catch (e) { status('No se ha podido deshacer (' + (e.message || e.code) + ')'); }
+    try { await h.undo(); redoSt.push(h); status('Deshecho'); } catch (e) { status('No se ha podido deshacer (' + (e.message || e.code) + ')'); }
     draw(); return;
   }
   status('No hay nada que deshacer');
 }
-$('bUndo').onclick = undo;
-addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !/SELECT|INPUT/.test(e.target.tagName)) { e.preventDefault(); undo(); } });
+async function redo() {
+  while (redoSt.length) {
+    const h = redoSt.pop();
+    if (!h.redo) continue;
+    try { await h.redo(); hist.push(h); status('Rehecho'); } catch (e) { status('No se ha podido rehacer (' + (e.message || e.code) + ')'); }
+    draw(); return;
+  }
+  status('No hay nada que rehacer');
+}
+$('bUndo').onclick = undo; $('bRedo').onclick = redo;
+addEventListener('keydown', e => { if (!(e.ctrlKey || e.metaKey) || /SELECT|INPUT/.test(e.target.tagName)) return; const k = e.key.toLowerCase();
+  if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); } else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); } });
 $('showGame').onchange = e => { showGame = e.target.checked; draw(); };
 $('bSave').onclick = async () => {
   if (!col || cur.length < (area() ? 3 : 2)) return;
@@ -113,17 +124,17 @@ $('bSave').onclick = async () => {
   if (mode === 'rock') doc.alto = $('whigh').value;
   if (mode === 'wall' || mode === 'ruin') { doc.alto = $('whigh').value; doc.mat = mode === 'ruin' ? 'piedra' : $('wmat').value; }
   const keep = cur; cur = []; draw(); status('Guardando…');
-  try { const id = newId(); await col.doc(id).set(doc); push(() => col.doc(id).delete()); status(mode === 'bld' ? 'Edificio guardado' : area() ? 'Zona guardada' : 'Línea guardada'); } catch (e) { cur = keep; draw(); status('No se ha podido guardar (' + (e.message || e.code) + '). Vuelve a pulsar Guardar.'); }
+  try { const id = newId(); await col.doc(id).set(doc); push(() => col.doc(id).delete(), null, () => col.doc(id).set(doc)); status(mode === 'bld' ? 'Edificio guardado' : area() ? 'Zona guardada' : 'Línea guardada'); } catch (e) { cur = keep; draw(); status('No se ha podido guardar (' + (e.message || e.code) + '). Vuelve a pulsar Guardar.'); }
 };
 $('bNo').onclick = () => { sel = null; $('confirm').hidden = true; draw(); };
 $('bYes').onclick = async () => {
   const s = sel; sel = null; $('confirm').hidden = true; draw(); if (!s) return; status('Guardando…');
   try {
     if (s.reset) { await resetAll(); return; }
-    if (s.item) { const raw = s.item.raw, id = s.item.id; await col.doc(id).delete(); push(() => col.doc(id).set(raw)); status('Borrado'); }
+    if (s.item) { const raw = s.item.raw, id = s.item.id; await col.doc(id).delete(); push(() => col.doc(id).set(raw), null, () => col.doc(id).delete()); status('Borrado'); }
     else if (s.cat) { const k = docId(keyOf(s.cat)), v = { id: s.cat.id, cx: s.cat.c[0], cz: s.cat.c[1], at: Date.now() };
-      if (gone.has(k)) { const old = gone.get(k); await colGone.doc(k).delete(); push(() => colGone.doc(k).set(old)); status('La casa vuelve a estar'); }
-      else { await colGone.doc(k).set(v); push(() => colGone.doc(k).delete()); status('Casa quitada'); } }
+      if (gone.has(k)) { const old = gone.get(k); await colGone.doc(k).delete(); push(() => colGone.doc(k).set(old), null, () => colGone.doc(k).delete()); status('La casa vuelve a estar'); }
+      else { await colGone.doc(k).set(v); push(() => colGone.doc(k).delete(), null, () => colGone.doc(k).set(v)); status('Casa quitada'); } }
   } catch (e) { status('No se ha podido guardar (' + (e.message || e.code) + ')'); }
 };
 // empezar de cero: borra todo lo dibujado y todo lo quitado (el ajuste de la foto se queda)
@@ -131,7 +142,8 @@ $('bReset').onclick = () => { if (!db) return; sel = { reset: true }; ask('¿Bor
 async function resetAll() {
   status('Borrando todo…');
   const snapI = items.map(i => [i.id, i.raw]), snapG = [...gone], snapW = [...wallGone], snapA = noAuto, snapF = [...shaped].map(([k, v]) => [k, v.raw]);
-  push(() => Promise.all([...snapF.map(([k, v]) => colShape.doc(k).set(v)), ...snapI.map(([id, v]) => col.doc(id).set(v)), ...snapG.map(([k, v]) => colGone.doc(k).set(v)), ...snapW.map(([k, v]) => colWallGone.doc(k).set(v)), db.collection('ajuste').doc('tapias').set({ todas: snapA, at: Date.now() })]));
+  push(() => Promise.all([...snapF.map(([k, v]) => colShape.doc(k).set(v)), ...snapI.map(([id, v]) => col.doc(id).set(v)), ...snapG.map(([k, v]) => colGone.doc(k).set(v)), ...snapW.map(([k, v]) => colWallGone.doc(k).set(v)), db.collection('ajuste').doc('tapias').set({ todas: snapA, at: Date.now() })]), null,
+    () => Promise.all([...snapF.map(([k]) => colShape.doc(k).delete()), ...snapI.map(([id]) => col.doc(id).delete()), ...snapG.map(([k]) => colGone.doc(k).delete()), ...snapW.map(([k]) => colWallGone.doc(k).delete()), db.collection('ajuste').doc('tapias').set({ todas: false, at: Date.now() })]));
   const jobs = [...snapF.map(([k]) => colShape.doc(k).delete()), ...items.map(i => col.doc(i.id).delete()), ...[...gone.keys()].map(k => colGone.doc(k).delete()), ...[...wallGone.keys()].map(k => colWallGone.doc(k).delete()), db.collection('ajuste').doc('tapias').set({ todas: false, at: Date.now() })];
   const r = await Promise.allSettled(jobs), bad = r.filter(x => x.status === 'rejected').length;
   cur = []; draw(); status(bad ? `Quedan ${bad} cosas sin borrar: vuelve a pulsar Empezar de cero` : 'Plano limpio: empieza de cero');
@@ -157,7 +169,7 @@ $('eSave').onclick = async () => {
   if (k === 'rocks') doc.alto = $('eHigh').value;
   if (k === 'building') doc.floors = +$('eFloors').value;
   sel = null; $('edit').hidden = true; draw(); status('Guardando…');
-  try { await col.doc(it.id).set(doc); push(() => col.doc(it.id).set(prev)); status('Cambios guardados'); } catch (e) { status('No se ha podido guardar (' + (e.message || e.code) + ')'); }
+  try { await col.doc(it.id).set(doc); push(() => col.doc(it.id).set(prev), null, () => col.doc(it.id).set(doc)); status('Cambios guardados'); } catch (e) { status('No se ha podido guardar (' + (e.message || e.code) + ')'); }
 };
 // forma de una casa del Catastro: se guarda aparte (colección 'forma') y se puede volver a la original
 $('shapeCancel').onclick = () => { sel = null; $('shapeBar').hidden = true; draw(); };
@@ -165,13 +177,13 @@ $('shapeSave').onclick = async () => {
   const s = sel; if (!s?.cat || !colShape) return; const k = docId(keyOf(s.cat)), prev = shaped.get(k)?.raw || null;
   const v = { id: s.cat.id, cx: s.cat.c[0], cz: s.cat.c[1], xy: s.item.p.flatMap(q => [Math.round(q[0] * 10) / 10, Math.round(q[1] * 10) / 10]), at: Date.now() };
   sel = null; $('shapeBar').hidden = true; status('Guardando…');
-  try { await colShape.doc(k).set(v); push(() => prev ? colShape.doc(k).set(prev) : colShape.doc(k).delete()); status('Forma de la casa guardada'); } catch (e) { status('No se ha podido guardar (' + (e.message || e.code) + ')'); }
+  try { await colShape.doc(k).set(v); push(() => prev ? colShape.doc(k).set(prev) : colShape.doc(k).delete(), null, () => colShape.doc(k).set(v)); status('Forma de la casa guardada'); } catch (e) { status('No se ha podido guardar (' + (e.message || e.code) + ')'); }
   draw();
 };
 $('shapeOrig').onclick = async () => {
   const s = sel; if (!s?.cat || !colShape) return; const k = docId(keyOf(s.cat)), prev = shaped.get(k)?.raw; if (!prev) return;
   sel = null; $('shapeBar').hidden = true;
-  try { await colShape.doc(k).delete(); push(() => colShape.doc(k).set(prev)); status('La casa vuelve a su forma del Catastro'); } catch (e) { status('No se ha podido guardar (' + (e.message || e.code) + ')'); }
+  try { await colShape.doc(k).delete(); push(() => colShape.doc(k).set(prev), null, () => colShape.doc(k).delete()); status('La casa vuelve a su forma del Catastro'); } catch (e) { status('No se ha podido guardar (' + (e.message || e.code) + ')'); }
   draw();
 };
 function ask(text, yes) { $('confirmTxt').textContent = text; $('bYes').textContent = yes; $('confirm').hidden = false; draw(); }
@@ -196,7 +208,7 @@ cv.addEventListener('pointermove', e => {
   }
   if (drag) { const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y; if (Math.hypot(dx, dy) > 7) drag.moved = true; if (drag.moved) { if (drag.pt) { drag.pt.arr[drag.pt.i] = toW(e.offsetX, e.offsetY); } else if (mode === 'photo') { off = [drag.ox + dx / view.s, drag.oz + dy / view.s]; showOff(); } else { view.cx = drag.cx - dx / view.s; view.cz = drag.cz - dy / view.s; } draw(); } }
 });
-cv.addEventListener('pointerup', e => { const d = drag; ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (d?.pt && d.moved) { const { arr, i, orig } = d.pt; push(() => { arr[i] = orig; }, () => arr === cur || (sel?.item && arr === sel.item.p)); draw(); }
+cv.addEventListener('pointerup', e => { const d = drag; ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (d?.pt && d.moved) { const { arr, i, orig } = d.pt, now = arr[i].slice(); push(() => { arr[i] = orig; }, () => arr === cur || (sel?.item && arr === sel.item.p), () => { arr[i] = now; }); draw(); }
   else if (d && !d.moved && ptrs.size === 0 && !d.pt) tap(e.offsetX, e.offsetY); drag = null; });
 cv.addEventListener('pointercancel', e => { ptrs.delete(e.pointerId); drag = null; pinch = null; });
 cv.addEventListener('wheel', e => {
@@ -215,7 +227,7 @@ function tap(px, py) {
     }
     if (!best || !colWallGone) return; const k = wkey(best), was = wallGone.has(k);
     const v = { x0: best.p[0][0], z0: best.p[0][1], x1: best.p[best.p.length - 1][0], z1: best.p[best.p.length - 1][1], at: Date.now() };
-    push(() => was ? colWallGone.doc(k).set(v) : colWallGone.doc(k).delete());
+    push(() => was ? colWallGone.doc(k).set(v) : colWallGone.doc(k).delete(), null, () => was ? colWallGone.doc(k).delete() : colWallGone.doc(k).set(v));
     (was ? colWallGone.doc(k).delete() : colWallGone.doc(k).set(v))
       .then(() => status(was ? 'La tapia vuelve a estar' : 'Tapia quitada'), e => status('No se ha podido guardar (' + (e.message || e.code) + ')'));
     return;
@@ -243,7 +255,7 @@ function tap(px, py) {
     return;
   }
   if (Math.abs(x) > B || Math.abs(z) > B) return;
-  const arr = cur; cur.push([x, z]); push(() => { arr.pop(); }, () => cur === arr && arr.length > 0); draw();
+  const arr = cur, pt = [x, z]; cur.push(pt); push(() => { arr.pop(); }, () => cur === arr && arr.length > 0, () => { arr.push(pt); }); draw();
 }
 addEventListener('resize', resize); resize();
 // todo se guarda para que Claude lo lea y lo ponga en el juego
