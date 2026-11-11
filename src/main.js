@@ -3,7 +3,7 @@ import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { Input } from './input.js';
 import { makeTextures } from './textures.js';
 import { Plane, flattenAirfield, buildAirfield, onAirfield } from './plane.js';
-import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, buildPlaza, Trees, smoothRoads, villageMask, yardWalls, buildBridges, applyPlano, planoWalls, buildRocks } from './world.js';
+import { Terrain, Colliders, buildTerrain, buildBuildings, buildRoads, buildWalls, buildPlaza, Trees, smoothRoads, villageMask, yardWalls, buildBridges, applyPlano, planoWalls, buildRocks, applyLevels, groundPaint } from './world.js';
 import { Animals } from './animals.js';
 import { Player } from './player.js';
 import { Car } from './car.js';
@@ -73,7 +73,8 @@ async function load(map) {
   const meta = { ...data.terrain, ortho: { full: data.ortho.full.bounds, center: data.ortho.center.bounds } };
   smoothRoads(data.roads); // curvas redondeadas
   const center = data.plaza?.start || data.spawn;
-  const ground = buildTerrain(meta, terrain, oFull, oCenter, tex, data.style === 'urban' ? null : villageMask(data, center)); scene.add(ground);
+  if (plano?.niveles?.length) applyLevels(terrain, plano.niveles); // desniveles y taludes del plano
+  const ground = buildTerrain(meta, terrain, oFull, oCenter, tex, data.style === 'urban' ? null : villageMask(data, center), data.style === 'urban' ? null : groundPaint(plano?.suelo)); scene.add(ground);
   const colliders = new Colliders();
   if (airfield) scene.add(buildAirfield(airfield, terrain, colliders));
   scene.add(buildBridges(data.roads, terrain, tex, colliders)); // antes que las calles: su altura pasa por el tablero

@@ -202,6 +202,21 @@ export function makeTextures(renderer) {
     for (let i = 0; i < 8000; i++) { const v = (r() - .5) * 60; g.fillStyle = `rgba(${170 + v | 0},${135 + v | 0},${95 + v | 0},0.5)`; g.fillRect(r() * 256, r() * 256, 1 + r() * 3, 1 + r() * 3); }
     out.dirt = tex(c);
   }
+  // Hierba (pincel del plano)
+  {
+    const [c, g] = canvas(256, 256); const r = rng(29);
+    g.fillStyle = '#5f7f34'; g.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 9000; i++) { const v = (r() - .5) * 50, x = r() * 256, y = r() * 256; g.strokeStyle = `rgba(${90 + v | 0},${130 + v | 0},${55 + v * 0.6 | 0},0.6)`; g.lineWidth = 1; g.beginPath(); g.moveTo(x, y); g.lineTo(x + (r() - .5) * 3, y - 2 - r() * 4); g.stroke(); }
+    for (let i = 0; i < 30; i++) { g.fillStyle = 'rgba(150,140,80,0.12)'; g.beginPath(); g.arc(r() * 256, r() * 256, 6 + r() * 20, 0, 7); g.fill(); }
+    out.grass = tex(c);
+  }
+  // Grava (pincel del plano)
+  {
+    const [c, g] = canvas(256, 256); const r = rng(31);
+    g.fillStyle = '#a9a397'; g.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 3500; i++) { const v = 120 + r() * 110 | 0, w = 1.5 + r() * 3.5; g.fillStyle = `rgb(${v},${v - 4 | 0},${v - 12 | 0})`; g.beginPath(); g.ellipse(r() * 256, r() * 256, w, w * (0.6 + r() * 0.4), r() * 3, 0, 7); g.fill(); g.fillStyle = 'rgba(40,35,30,0.25)'; }
+    out.gravel = tex(c);
+  }
   // Detalle de suelo (se multiplica sobre la ortofoto de cerca)
   {
     const [c, g] = canvas(256, 256); const r = rng(21);

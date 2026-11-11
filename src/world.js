@@ -42,7 +42,18 @@ export class Terrain {
     const t = (m - (E - 150)) / 150, k = t * t * (3 - 2 * t), hi = this.innerHeight(x, z);
     return hi + (ho - hi) * k;
   }
+  // rejilla fina (1-2 m) donde Darío dibujó desniveles: la de 8 m no da para un talud
+  setFine(x0, z0, x1, z1, cell) {
+    const nx = Math.round((x1 - x0) / cell) + 1, nz = Math.round((z1 - z0) / cell) + 1, h = new Float32Array(nx * nz);
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) h[j * nx + i] = this.innerHeight(x0 + i * cell, z0 + j * cell);
+    this.f = { x0, z0, x1, z1, nx, nz, cell, h };
+  }
   innerHeight(x, z) {
+    const f = this.f;
+    if (f && x >= f.x0 && x <= f.x1 && z >= f.z0 && z <= f.z1) {
+      const fx = (x - f.x0) / f.cell, fz = (z - f.z0) / f.cell, i = Math.min(f.nx - 2, Math.floor(fx)), j = Math.min(f.nz - 2, Math.floor(fz)), u = fx - i, v = fz - j, h = f.h, n = f.nx;
+      return (h[j * n + i] * (1 - u) + h[j * n + i + 1] * u) * (1 - v) + (h[(j + 1) * n + i] * (1 - u) + h[(j + 1) * n + i + 1] * u) * v;
+    }
     const fx = (x - this.ox) / this.cell, fz = (z - this.oz) / this.cell;
     const i = Math.max(0, Math.min(this.n - 2, Math.floor(fx))), j = Math.max(0, Math.min(this.n - 2, Math.floor(fz)));
     const u = Math.max(0, Math.min(1, fx - i)), v = Math.max(0, Math.min(1, fz - j)), n = this.n, h = this.h;
@@ -815,27 +826,42 @@ export class Trees {
 }
 
 // ---------- terreno con ortofoto PNOA + textura de detalle ----------
-export function buildTerrain(meta, terrain, orthoFull, orthoCenter, tex, mask = null) {
+export function buildTerrain(meta, terrain, orthoFull, orthoCenter, tex, mask = null, paint = null) {
   const n = meta.n, size = (n - 1) * meta.cell;
   const geo = new THREE.PlaneGeometry(size, size, n - 1, n - 1); geo.rotateX(-Math.PI / 2);
   geo.translate(meta.origin[0] + size / 2, 0, meta.origin[1] + size / 2);
   const p = geo.attributes.position;
   for (let i = 0; i < p.count; i++) p.setY(i, terrain.ground(p.getX(i), p.getZ(i)));
+  const f = terrain.f;
+  if (f) { // fuera el trozo que cubre la malla fina
+    const idx = geo.index.array, keep = [];
+    for (let t = 0; t < idx.length; t += 3) {
+      const cx = (p.getX(idx[t]) + p.getX(idx[t + 1]) + p.getX(idx[t + 2])) / 3, cz = (p.getZ(idx[t]) + p.getZ(idx[t + 1]) + p.getZ(idx[t + 2])) / 3;
+      if (!(cx > f.x0 && cx < f.x1 && cz > f.z0 && cz < f.z1)) keep.push(idx[t], idx[t + 1], idx[t + 2]);
+    }
+    geo.setIndex(keep);
+  }
   geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, terrainMaterial(orthoFull, orthoCenter, meta.ortho.full, meta.ortho.center, tex, mask)); mesh.receiveShadow = true;
+  const mat = terrainMaterial(orthoFull, orthoCenter, meta.ortho.full, meta.ortho.center, tex, mask, paint);
+  const mesh = new THREE.Mesh(geo, mat); mesh.receiveShadow = true;
+  if (f) {
+    const fg = new THREE.PlaneGeometry(f.x1 - f.x0, f.z1 - f.z0, f.nx - 1, f.nz - 1); fg.rotateX(-Math.PI / 2); fg.translate((f.x0 + f.x1) / 2, 0, (f.z0 + f.z1) / 2);
+    const q = fg.attributes.position; for (let i = 0; i < q.count; i++) q.setY(i, terrain.ground(q.getX(i), q.getZ(i)));
+    fg.computeVertexNormals(); const fm = new THREE.Mesh(fg, mat); fm.receiveShadow = true; mesh.add(fm);
+  }
   return mesh;
 }
-export function terrainMaterial(orthoFull, orthoCenter, fb, cb, tex, mask = null) {
+export function terrainMaterial(orthoFull, orthoCenter, fb, cb, tex, mask = null, paint = null) {
   const mat = new THREE.MeshStandardMaterial({ map: orthoFull, roughness: 1 });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.tCenter = mat.userData.tC || (mat.userData.tC = { value: orthoCenter }); sh.uniforms.tDetail = { value: tex.detail };
-    sh.uniforms.tMask = { value: mask?.tex || null }; sh.uniforms.maskB = { value: mask?.bounds || new THREE.Vector4(0, 0, 1, 1) }; sh.uniforms.tAsph = { value: tex.asphalt }; sh.uniforms.tConc = { value: tex.concrete }; sh.uniforms.tDirt = { value: tex.dirt };
+    sh.uniforms.tMask = { value: mask?.tex || null }; sh.uniforms.maskB = { value: mask?.bounds || new THREE.Vector4(0, 0, 1, 1) }; sh.uniforms.tAsph = { value: tex.asphalt }; sh.uniforms.tConc = { value: tex.concrete }; sh.uniforms.tDirt = { value: tex.dirt }; sh.uniforms.tGrass = { value: tex.grass }; sh.uniforms.tGravel = { value: tex.gravel }; sh.uniforms.tPaint = { value: paint?.tex || null }; sh.uniforms.paintB = { value: paint?.bounds || new THREE.Vector4(0, 0, 1, 1) };
     sh.uniforms.fullB = { value: new THREE.Vector4(...fb) }; sh.uniforms.centerB = mat.userData.cB || (mat.userData.cB = { value: new THREE.Vector4(...cb) });
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = (modelMatrix * vec4(transformed,1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
       varying vec3 vWPos; uniform sampler2D tCenter; uniform sampler2D tDetail; uniform vec4 fullB; uniform vec4 centerB;
-      uniform sampler2D tMask; uniform sampler2D tAsph; uniform sampler2D tConc; uniform sampler2D tDirt; uniform vec4 maskB;`)
+      uniform sampler2D tMask; uniform sampler2D tAsph; uniform sampler2D tConc; uniform sampler2D tDirt; uniform vec4 maskB; uniform sampler2D tGrass; uniform sampler2D tGravel; uniform sampler2D tPaint; uniform vec4 paintB;`)
       .replace('#include <map_fragment>', `
       vec2 uvF = vec2((vWPos.x - fullB.x) / (fullB.z - fullB.x), (vWPos.z - fullB.y) / (fullB.w - fullB.y));
       vec4 col = texture2D(map, uvF);
@@ -855,11 +881,17 @@ export function terrainMaterial(orthoFull, orthoCenter, fb, cb, tex, mask = null
         float vf = 1.0 - smoothstep(200.0, 290.0, length(vWPos.xz - maskB.xy - maskB.zw * 0.5));
         vec3 dirt = texture2D(tDirt, vWPos.xz / 3.0).rgb;
         col.rgb = mix(col.rgb, mix(col.rgb, dirt, 0.8) * (0.8 + 0.25 * d), 0.95 * vf * (1.0 - a)); // todo lo que no es calle, tierra (lo pidió Darío: el gris de la foto confundía)
+        ${paint ? `vec2 uvP = (vWPos.xz - paintB.xy) / paintB.zw;
+        if (uvP.x > 0.0 && uvP.x < 1.0 && uvP.y > 0.0 && uvP.y < 1.0) { // suelo pintado por Darío en el plano
+          vec4 pk = texture2D(tPaint, uvP); float sw = pk.r + pk.g + pk.b + 0.001;
+          vec3 pc = (texture2D(tDirt, vWPos.xz / 3.0).rgb * pk.r + texture2D(tGrass, vWPos.xz / 2.5).rgb * pk.g + texture2D(tGravel, vWPos.xz / 2.0).rgb * pk.b) / sw;
+          col.rgb = mix(col.rgb, pc * (0.82 + 0.3 * d), smoothstep(0.15, 0.6, pk.a));
+        }` : ''}
         col.rgb = mix(col.rgb, asph, a);
       }` : ''}
       diffuseColor *= col;`);
   };
-  mat.customProgramCacheKey = () => 'terrain' + (mask ? 'm' : '');
+  mat.customProgramCacheKey = () => 'terrain' + (mask ? 'm' : '') + (paint ? 'p' : '');
   return mat;
 }
 
@@ -960,6 +992,47 @@ export function buildBridges(roads, terrain, tex, colliders) {
 // ---------- lo que Darío dibujó en el plano (public/world/<mapa>/plano.json) ----------
 const ptInPoly = (x, z, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [xi, zi] = P[i], [xj, zj] = P[j]; if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) c = !c; } return c; };
 const pairs = (xy) => { const P = []; for (let i = 0; i + 1 < xy.length; i += 2) P.push([xy[i], xy[i + 1]]); return P; };
+// suelo pintado en el plano: tierra (rojo), hierba (verde), grava (azul); la goma recorta. Cubre la foto de cerca (±300 m)
+export function groundPaint(strokes, R = 300, size = 2048) {
+  if (!strokes?.length) return null;
+  const c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d'), s = size / (2 * R);
+  g.lineCap = 'round'; g.lineJoin = 'round'; g.filter = 'blur(1px)';
+  const COL = { tierra: '#f00', hierba: '#0f0', grava: '#00f' };
+  for (const st of strokes) {
+    const P = pairs(st.xy); if (!P.length) continue;
+    g.globalCompositeOperation = st.mat === 'borrar' ? 'destination-out' : 'source-over'; g.strokeStyle = COL[st.mat] || '#000'; g.lineWidth = Math.max(1, 2 * st.r * s);
+    g.beginPath(); P.forEach((p, i) => i ? g.lineTo((p[0] + R) * s, (p[1] + R) * s) : g.moveTo((p[0] + R) * s, (p[1] + R) * s)); if (P.length === 1) g.lineTo((P[0][0] + R) * s + 0.01, (P[0][1] + R) * s); g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c); t.flipY = false; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false;
+  return { tex: t, bounds: new THREE.Vector4(-R, -R, 2 * R, 2 * R) };
+}
+// desniveles del plano: la zona queda llana a su altura media + dh, y un talud de w metros la une con lo de alrededor
+const TALUD = { suave: 12, medio: 6, fuerte: 3, muro: 1 };
+export function applyLevels(terrain, niveles) {
+  const L = (niveles || []).map(n => ({ p: pairs(n.xy), dh: +n.dh || 0, w: TALUD[n.talud] ?? 6 })).filter(n => n.p.length >= 3);
+  if (!L.length) return;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const n of L) for (const [x, z] of n.p) { x0 = Math.min(x0, x - n.w - 8); x1 = Math.max(x1, x + n.w + 8); z0 = Math.min(z0, z - n.w - 8); z1 = Math.max(z1, z + n.w + 8); }
+  const C = terrain.cell, snap = (v, up) => terrain.ox + (up ? Math.ceil : Math.floor)((v - terrain.ox) / C) * C; // a líneas de la malla de 8 m: sin grietas en la costura
+  x0 = snap(x0); z0 = snap(z0); x1 = snap(x1, true); z1 = snap(z1, true);
+  const cell = (x1 - x0) * (z1 - z0) > 260 * 260 ? 2 : 1;
+  terrain.setFine(x0, z0, x1, z1, cell);
+  const f = terrain.f, h = f.h;
+  for (const n of L) {
+    let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity; for (const [x, z] of n.p) { a0 = Math.min(a0, x); a1 = Math.max(a1, x); b0 = Math.min(b0, z); b1 = Math.max(b1, z); }
+    let sum = 0, cnt = 0; // altura media dentro de la zona
+    for (let z = b0; z <= b1; z += 1) for (let x = a0; x <= a1; x += 1) if (ptInPoly(x, z, n.p)) { sum += terrain.innerHeight(x, z); cnt++; }
+    const target = (cnt ? sum / cnt : terrain.innerHeight(n.p[0][0], n.p[0][1])) + n.dh;
+    const i0 = Math.max(0, Math.floor((a0 - n.w - f.x0) / cell)), i1 = Math.min(f.nx - 1, Math.ceil((a1 + n.w - f.x0) / cell));
+    const j0 = Math.max(0, Math.floor((b0 - n.w - f.z0) / cell)), j1 = Math.min(f.nz - 1, Math.ceil((b1 + n.w - f.z0) / cell));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const x = f.x0 + i * cell, z = f.z0 + j * cell;
+      let k = 1;
+      if (!ptInPoly(x, z, n.p)) { let d = Infinity; for (let e = 0; e < n.p.length; e++) d = Math.min(d, segDist(x, z, n.p[e], n.p[(e + 1) % n.p.length])); if (d >= n.w) continue; k = 1 - d / n.w; k = k * k * (3 - 2 * k); }
+      h[j * f.nx + i] += (target - h[j * f.nx + i]) * k;
+    }
+  }
+}
 const segDist = (x, z, a, b) => { const dx = b[0] - a[0], dz = b[1] - a[1], L = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L)); return Math.hypot(x - a[0] - dx * t, z - a[1] - dz * t); };
 // Casas quitadas y añadidas, arboledas y claros, y el ajuste de la foto. Va antes de construir nada.
 export function applyPlano(data, plano) {
