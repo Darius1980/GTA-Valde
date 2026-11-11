@@ -310,6 +310,20 @@ function tap(px, py) {
   const arr = cur, pt = [x, z]; cur.push(pt); push(() => { arr.pop(); }, () => cur === arr && arr.length > 0, () => { arr.push(pt); }); draw();
 }
 addEventListener('resize', resize); resize();
+// botón Generar el juego: deja un comentario para Claude, que lee el plano y vuelve a publicar el juego
+(async () => {
+  const cm = window.claude ? await window.claude.use('comments').catch(() => null) : null; if (!cm) return;
+  const b = $('bGen'), why = { writers_only: 'Solo quien edita el plano puede pedirlo', no_session: 'Claude no está atento ahora: pídelo en el chat', off: '' };
+  const check = async () => { let st = 'off'; try { st = await cm.canSendToClaude(); } catch {} b.hidden = st === 'off'; b.disabled = st !== 'available'; $('genTxt').textContent = st === 'available' ? '' : (why[st] || ''); return st; };
+  await check(); setInterval(check, 30000);
+  b.onclick = async () => {
+    if (await check() !== 'available') return;
+    b.disabled = true; $('genTxt').textContent = 'Avisando a Claude…';
+    try { const anchor = await cm.anchorFor(b); await cm.sendToClaude({ anchor, text: 'Generar el juego: pasa el plano tal como está ahora al juego y publícalo.' }); $('genTxt').textContent = 'Aviso enviado: el juego se está generando. Te contesto en el chat cuando esté.'; }
+    catch (e) { $('genTxt').textContent = e?.code === 'rate_limited' ? 'Espera un poco antes de volver a pedirlo' : 'No se ha podido avisar (' + (e?.code || e?.message || e) + '): pídelo en el chat'; }
+    setTimeout(() => { b.disabled = false; }, 15000);
+  };
+})();
 // todo se guarda para que Claude lo lea y lo ponga en el juego
 (async () => {
   const t = setTimeout(() => status('Sin conexión: puedes mirar el plano, pero no guardar.'), 10000);
