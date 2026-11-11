@@ -75,6 +75,42 @@ export class Colliders {
       const k = this.key(i, j); if (!this.map.has(k)) this.map.set(k, []); this.map.get(k).push(seg);
     }
   }
+  // planta de un edificio, para saber si un punto ha quedado dentro (los muros son solo segmentos finos)
+  addArea(pts) {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const [x, z] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    const a = { pts, x0, x1, z0, z1 }, c = this.cell; this.areas = this.areas || new Map();
+    for (let i = Math.floor(x0 / c); i <= Math.floor(x1 / c); i++) for (let j = Math.floor(z0 / c); j <= Math.floor(z1 / c); j++) {
+      const k = this.key(i, j); if (!this.areas.has(k)) this.areas.set(k, []); this.areas.get(k).push(a);
+    }
+  }
+  inside(x, z) {
+    const list = this.areas?.get(this.key(Math.floor(x / this.cell), Math.floor(z / this.cell))); if (!list) return null;
+    for (const a of list) {
+      if (x < a.x0 || x > a.x1 || z < a.z0 || z > a.z1) continue;
+      let o = false; const P = a.pts;
+      for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+        const [xi, zi] = P[i], [xj, zj] = P[j];
+        if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) o = !o;
+      }
+      if (o) return a;
+    }
+    return null;
+  }
+  // si (pos) está dentro de un edificio, lo saca por la pared más cercana, a r de ella; devuelve la normal hacia fuera
+  expel(pos, r, depth = 0) {
+    const a = this.inside(pos.x, pos.z); if (!a) return null;
+    const P = a.pts; let best = null, bd = Infinity;
+    for (let i = 0; i < P.length; i++) {
+      const [ax, az] = P[i], [bx, bz] = P[(i + 1) % P.length], dx = bx - ax, dz = bz - az, L = dx * dx + dz * dz || 1e-9;
+      const t = Math.max(0, Math.min(1, ((pos.x - ax) * dx + (pos.z - az) * dz) / L)), qx = ax + dx * t, qz = az + dz * t, d = Math.hypot(pos.x - qx, pos.z - qz);
+      if (d < bd) { bd = d; best = { qx, qz }; }
+    }
+    let nx = best.qx - pos.x, nz = best.qz - pos.z; const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l;
+    pos.x = best.qx + nx * (r + 0.05); pos.z = best.qz + nz * (r + 0.05);
+    if (depth < 3 && this.inside(pos.x, pos.z)) return this.expel(pos, r, depth + 1); // salió a otro edificio pegado
+    return { x: nx, z: nz };
+  }
   addPolygon(pts, kind) { for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; this.addSegment(a[0], a[1], b[0], b[1], kind); } }
   // Primera intersección del segmento a→b con edificios (fracción 0..1), para que la cámara no atraviese paredes
   raycast(ax, az, bx, bz) {
@@ -208,6 +244,7 @@ export function buildBuildings(data, terrain, tex, colliders) {
   for (const b of data.buildings) {
     let pts = b.p.slice(); if (signedArea(pts) > 0) pts.reverse(); // orden que deja la normal de los muros hacia fuera
     if (pts.length < 3) continue;
+    if (colliders) colliders.addArea(pts);
     let base = Infinity, top = -Infinity;
     for (const p of pts) { const h = terrain.height(p[0], p[1]); base = Math.min(base, h); top = Math.max(top, h); }
     const floors = Math.max(1, b.f || 1);

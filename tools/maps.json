@@ -6,7 +6,7 @@
   "half": 1800,
   "detail_half": 300,
   "catastro": true,
-  "car_scale": 0.7,
+  "car_scale": 0.63,
   "person_scale": 0.66,
   "road_scale": 0.8,
   "church": "1199001QG3419N",

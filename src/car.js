@@ -95,7 +95,12 @@ export class Car {
       sp.material.color.setHex(dark ? 0x222222 : 0x9a9a9a);
     }
   }
-  place(x, z, h) { this.pos.set(x, this.world.terrain.height(x, z), z); this.heading = h; this.#orient(1); }
+  // aparca en (x, z); si ahí hay una casa o una tapia, lo deja justo fuera
+  place(x, z, h) {
+    this.pos.set(x, 0, z); this.heading = h;
+    const col = this.world.colliders; if (col) for (let i = 0; i < 4 && this.#walls(col); i++);
+    this.pos.y = this.world.terrain.height(this.pos.x, this.pos.z); this.#orient(1);
+  }
   circles() {
     const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
     return this.spec.circ.map(o => [this.pos.x + fx * o * this.s, this.pos.z + fz * o * this.s]);
@@ -116,6 +121,12 @@ export class Car {
     const { colliders, terrain, cars } = this.world;
     if (this.ai && !this.driver) { // conducido por la IA del tráfico
       this.ai.update(dt, this.world.obstacles || []);
+      // si la calle roza una casa, que el coche no se meta dentro (solo las casas: las tapias del plano lo dejarían atascado)
+      const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
+      for (const o0 of this.spec.circ) {
+        const o = o0 * this.s, p = { x: this.pos.x + fx * o, z: this.pos.z + fz * o };
+        if (colliders.expel(p, this.R)) { this.pos.x = p.x - fx * o; this.pos.z = p.z - fz * o; }
+      }
       this.#orient(dt); this.#spin(dt); this.#fx(dt); return;
     }
     if (input) {
@@ -142,22 +153,22 @@ export class Car {
     this.speed -= slope / 2 * 9.8 * dt * 0.6 * this.spec.slope;
     if (Math.abs(this.speed) < 0.02 && !(input && input.axes().y)) this.speed = 0;
 
-    this.heading -= this.speed * Math.tan(this.steer) / (this.spec.wb * this.s) * dt;
-    this.pos.x += Math.sin(this.heading) * this.speed * dt; this.pos.z += Math.cos(this.heading) * this.speed * dt;
+    // avance en pasos cortos (menos de medio radio): a 100 km/h y pocos fotogramas por segundo un solo paso
+    // saltaba por encima de una tapia o de la pared de una casa
+    const v0 = Math.abs(this.speed), dh = -this.speed * Math.tan(this.steer) / (this.spec.wb * this.s) * dt;
+    const n = Math.min(12, Math.max(1, Math.ceil(v0 * dt / (this.R * 0.45))));
+    let wallN = null, hitAt = null, carHit = null;
+    for (let k = 0; k < n; k++) {
+      this.heading += dh / n;
+      this.pos.x += Math.sin(this.heading) * this.speed * dt / n; this.pos.z += Math.cos(this.heading) * this.speed * dt / n;
+      if (this.speed === 0 && this.settled) break;
+      const hit = this.#walls(colliders);
+      if (hit) { wallN = wallN || hit.n; hitAt = hitAt || hit.at; }
+    }
 
     if (this.speed !== 0 || !this.settled) {
-      // colisiones con edificios, muros y otros coches
-      let wallN = null, hitAt = null, carHit = null;
-      const f2x = Math.sin(this.heading), f2z = Math.cos(this.heading), v0 = Math.abs(this.speed);
-      for (const o0 of [-1.4, 0, 1.4]) {
-        const o = o0 * this.s, p = { x: this.pos.x + f2x * o, z: this.pos.z + f2z * o };
-        const hit = colliders.resolve(p, this.R);
-        if (hit) {
-          this.pos.x = p.x - f2x * o; this.pos.z = p.z - f2z * o;
-          wallN = wallN || hit; // la normal apunta desde la pared hacia el coche
-          hitAt = hitAt || localHit(this, p.x - hit.x * this.R, p.z - hit.z * this.R);
-        }
-      }
+      // colisiones con otros coches; las paredes ya se han resuelto en cada paso
+      const f2x = Math.sin(this.heading), f2z = Math.cos(this.heading);
       if (hitAt && v0 > 3 && this.driver) this.damage((v0 - 3) * 1.6, hitAt[0], hitAt[1]);
       for (const c of cars) if (c !== this) {
         // par de círculos con más solape entre los dos coches
@@ -184,6 +195,7 @@ export class Car {
         }
         carHit = carHit || c;
       }
+      if (carHit) this.#walls(colliders); // que un empujón de otro coche no lo meta en una pared
       if (wallN && Math.abs(this.speed) > 1) {
         // contra una pared: el coche se desvía y resbala a lo largo de ella en vez de pararse en seco
         const dir = Math.sign(this.speed), fx = f2x * dir, fz = f2z * dir, dot = fx * wallN.x + fz * wallN.z;
@@ -195,12 +207,29 @@ export class Car {
           this.heading += dh * 0.6;
           this.speed *= 0.55 + 0.4 * (1 - Math.abs(dot)); // de refilón casi no frena; de frente pierde la mitad
           this.pos.x += wallN.x * 0.05; this.pos.z += wallN.z * 0.05;
+          this.#walls(colliders); // el giro puede meter el morro en la pared
         }
       }
       this.#orient(dt);
       this.settled = true;
     }
     this.#spin(dt); this.#fx(dt);
+  }
+  // saca los círculos de choque de muros y edificios; si alguno ha quedado dentro de una casa, lo saca por la
+  // pared más cercana. Devuelve la normal del primer contacto y el punto tocado (local) o null
+  #walls(colliders) {
+    let res = null;
+    const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
+    for (const o0 of this.spec.circ) {
+      const o = o0 * this.s, p = { x: this.pos.x + fx * o, z: this.pos.z + fz * o };
+      const hit = colliders.expel(p, this.R) || colliders.resolve(p, this.R);
+      if (hit) {
+        colliders.resolve(p, this.R);
+        this.pos.x = p.x - fx * o; this.pos.z = p.z - fz * o;
+        res = res || { n: hit, at: localHit(this, p.x - hit.x * this.R, p.z - hit.z * this.R) }; // la normal apunta desde la pared hacia el coche
+      }
+    }
+    return res;
   }
   // adopta una velocidad (vector en planta) tras un golpe: la parte hacia delante pasa a la marcha y el coche
   // gira parcialmente hacia la nueva dirección, porque las ruedas no dejan ir de lado
