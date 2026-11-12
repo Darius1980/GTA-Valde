@@ -168,6 +168,7 @@ export class Plane {
         if (!this.edgeWarn) { this.edgeWarn = true; toast?.('Fin del mapa', 'La avioneta da la vuelta hacia Val de Santa María'); }
       } else this.edgeWarn = false;
       if (this.pos.y - gy < 12 && this.world.colliders.nearest(this.pos.x, this.pos.z, 3, 'building')) return this.#crash(toast, 'Has chocado contra una casa');
+      { const why = this.world.molinos?.hit(this.pos); if (why) return this.#crash(toast, why); }
       this.airT = (this.airT || 0) + dt;
       if (this.pos.y <= gy + GEAR && this.airT < 3) { this.pos.y = gy + GEAR; this.vy = Math.max(this.vy, 1); } // recién despegada: no rebota
       else if (this.pos.y <= gy + GEAR) {

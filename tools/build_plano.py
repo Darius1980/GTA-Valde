@@ -22,6 +22,7 @@ out = {
     'claros': [d['xy'] for d in tr if d['kind'] == 'clear'],
     'suelo': [{'mat': d.get('mat', 'tierra'), 'r': d.get('r', 2), 'xy': d['xy']} for d in tr if d['kind'] == 'suelo'],
     'niveles': [{'xy': d['xy'], 'dh': d.get('dh', 0), 'talud': d.get('talud', 'medio')} for d in tr if d['kind'] == 'nivel'],
+    'molinos': [d['xy'][:2] for d in tr if d['kind'] == 'molino' and len(d.get('xy', [])) >= 2],
 }
 prev = json.load(open(f'public/world/{m}/plano.json')) if os.path.exists(f'public/world/{m}/plano.json') else {}
 if 'aerodromo' in prev: out['aerodromo'] = prev['aerodromo']  # lo pone tools/find_airfield.py

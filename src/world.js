@@ -1030,8 +1030,11 @@ export function buildBridges(roads, terrain, tex, colliders) {
 const ptInPoly = (x, z, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [xi, zi] = P[i], [xj, zj] = P[j]; if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) c = !c; } return c; };
 const pairs = (xy) => { const P = []; for (let i = 0; i + 1 < xy.length; i += 2) P.push([xy[i], xy[i + 1]]); return P; };
 // suelo pintado en el plano: tierra (rojo), hierba (verde), grava (azul); la goma recorta. Cubre la foto de cerca (±300 m)
-export function groundPaint(strokes, R = 300, size = 2048) {
+export function groundPaint(strokes, R = 0, size = 0) {
   if (!strokes?.length) return null;
+  // el lienzo cubre todo lo pintado (al menos 300 m, como mucho el terreno del pueblo, 1800 m) con hasta 4096 px
+  if (!R) { R = 300; for (const st of strokes) { const P = pairs(st.xy); for (const [x, z] of P) R = Math.max(R, Math.abs(x) + (st.r || 2) + 4, Math.abs(z) + (st.r || 2) + 4); } R = Math.min(1800, Math.ceil(R / 50) * 50); }
+  if (!size) size = R <= 300 ? 2048 : 4096;
   const c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d'), s = size / (2 * R);
   g.lineCap = 'round'; g.lineJoin = 'round'; g.filter = 'blur(1px)';
   const COL = { tierra: '#f00', hierba: '#0f0', grava: '#00f' };

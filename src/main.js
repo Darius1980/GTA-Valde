@@ -21,6 +21,7 @@ import { Jobs } from './jobs.js';
 import { Plaza } from './fiesta.js';
 import { Interiors } from './interiors.js';
 import { Outer } from './outer.js';
+import { Molinos } from './molinos.js';
 
 const isMobile = matchMedia('(pointer: coarse)').matches;
 const canvas = document.getElementById('game');
@@ -88,6 +89,7 @@ async function load(map) {
   else if (data.style !== 'urban' && !data.walls.length) data.walls = yardWalls(data, colliders, [sites.gas, sites.shop, sites.taller?.b].filter(Boolean));
   scene.add(buildWalls(data, terrain, tex, colliders));
   if (plano) scene.add(buildRocks(plano, terrain, tex, colliders)); // berrocales dibujados en el plano
+  const molinos = new Molinos(plano?.molinos, terrain, colliders); scene.add(molinos.group); // molinos eólicos del plano
   const clearR = [[sites.gas, 13], [sites.shop, 15]].filter(([s]) => s);
   data.trees = data.trees.filter(([x, z]) => !clearR.some(([s, r]) => Math.hypot(x - s.x, z - s.z) < r) && !(airfield && onAirfield(airfield, x, z, 14)));
   const trees = new Trees(data, terrain, tex, colliders); scene.add(trees.group);
@@ -97,7 +99,7 @@ async function load(map) {
   const surfaces = [ground.material];
   roads.traverse(o => { if (o.isMesh && o.material?.map && !surfaces.includes(o.material)) surfaces.push(o.material); });
   buildings.traverse(o => { if (o.isMesh && (o.material?.map === tex.roof || o.material?.map === tex.flatRoof) && !surfaces.includes(o.material)) surfaces.push(o.material); });
-  return { data, terrain, colliders, trees, oFull, lamps: roads.userData.lamps, bellTower, tex, surfaces, sites, outer, oOuter, airfield };
+  return { data, terrain, colliders, trees, oFull, lamps: roads.userData.lamps, bellTower, tex, surfaces, sites, outer, oOuter, airfield, molinos };
 }
 
 const input = new Input(canvas);
@@ -135,10 +137,11 @@ function waitForMap() {
 }
 const hud = { mode: document.getElementById('mode'), speed: document.getElementById('speed'), hint: document.getElementById('hint'), place: document.getElementById('place') };
 
-waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull, lamps, bellTower, tex, surfaces, sites, outer, oOuter, airfield }) => {
+waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull, lamps, bellTower, tex, surfaces, sites, outer, oOuter, airfield, molinos }) => {
   const world = { terrain, colliders, scene, personScale: data.personScale || 1 };
   const player = new Player(world); scene.add(player.mesh);
   if (outer) world.edge = outer.data.half - 250;
+  world.molinos = molinos; if (molinos.list.length) { camera.far = 9000; camera.updateProjectionMatrix(); } // los molinos se ven desde lejos
   const plane = airfield ? new Plane({ world, f: airfield }) : null; if (plane) scene.add(plane.mesh);
   let flying = null;
   player.pos.set(data.spawn[0], terrain.height(data.spawn[0], data.spawn[1]), data.spawn[1]);
@@ -288,6 +291,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
       else player.pos.copy(flying.pos);
     }
     else if (driving) driving.update(dt, input, camState.yaw); else player.update(dt, input, camState.yaw);
+    molinos.update(dt, dayNight.n);
     if (!flying) plane?.update(0, null); // la hélice y la postura cuando está aparcada
     for (const c of cars) if (c !== driving && !c.police) {
       c.update(dt, null);

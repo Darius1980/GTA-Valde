@@ -1,6 +1,9 @@
 const B = 300; // la foto cubre de -300 a 300 m en x y en z (norte arriba)
 const cv = document.getElementById('cv'), g = cv.getContext('2d'), map = document.getElementById('map');
 const img = new Image(); img.src = 'ortho_center.jpg'; img.onload = draw;
+// fotos de alrededor (más bastas) para poner molinos en los montes: 3,6 km y 20 km de lado
+const FAR = 10000, PLANO = 4000, MID = 1800, EDIT = 4000, imgMid = new Image(), imgFar = new Image(), imgPlano = new Image(); imgMid.src = 'ortho_mid.jpg'; imgFar.src = 'ortho_far.jpg'; imgPlano.src = 'ortho_plano.jpg'; imgMid.onload = imgFar.onload = imgPlano.onload = () => draw();
+const ROTOR = 86; // palas de 86 m, buje a 150 m
 let view = { cx: -10, cz: 10, s: 2 }; // centro (m) y píxeles por metro
 // mode: wall | ruin | bld (dibujar) · gone (quitar casa del Catastro) · del (borrar algo mío)
 let shaped = new Map(), colShape = null, wallGone = new Map(), noAuto = false, colWallGone = null, trees = [], treeGone = new Map(), colTree = null, colTreeGone = null, off = [0, 0], offSaved = [0, 0], fz = 1, frot = 0, mode = 'wall', cur = [], items = [], gone = new Map(), sel = null, showGame = true, db = null, col = null, colGone = null;
@@ -17,8 +20,8 @@ const PAINT = { tierra: [176, 140, 98], hierba: [96, 150, 60], grava: [205, 200,
 const TALUD = { suave: 12, medio: 6, fuerte: 3, muro: 1 }, TALUD_TXT = { suave: 'talud suave', medio: 'talud medio', fuerte: 'talud fuerte', muro: 'corte vertical' };
 const dhTxt = v => v > 0 ? 'Subir ' + v + ' m' : v < 0 ? 'Bajar ' + (-v) + ' m' : 'Aplanar';
 const layer = document.createElement('canvas'), lg = layer.getContext('2d');
-const TOOL = { wall: 'Tapia', ruin: 'Ruina', rock: 'Rocas naturales', bld: 'Edificio nuevo', shape: 'Ajustar casa', gone: 'Quitar casa', tree: 'Poner árboles', untree: 'Quitar árboles', paint: 'Pincel de suelo', nivel: 'Desnivel', del: 'Editar lo mío', unwall: 'Quitar tapia del juego', photo: 'Mover foto' };
-const HINT = { wall: 'Toca punto a punto y pulsa Guardar', ruin: 'Toca punto a punto y pulsa Guardar', rock: 'Dibuja el contorno de las rocas', bld: 'Toca las esquinas del edificio', shape: 'Toca una casa y arrastra sus esquinas', gone: 'Toca la casa que sobra', tree: 'Dibuja el contorno de la zona', untree: 'Dibuja el contorno de la zona', paint: 'Arrastra para pintar; dos dedos o botón derecho para moverte', nivel: 'Dibuja el contorno de la zona que sube o baja', del: 'Toca algo tuyo para cambiarlo o borrarlo', unwall: 'Toca una tapia blanca discontinua', photo: 'Arrastra la foto o usa las flechas' };
+const TOOL = { wall: 'Tapia', ruin: 'Ruina', rock: 'Rocas naturales', bld: 'Edificio nuevo', shape: 'Ajustar casa', gone: 'Quitar casa', tree: 'Poner árboles', untree: 'Quitar árboles', paint: 'Pincel de suelo', nivel: 'Desnivel', del: 'Editar lo mío', unwall: 'Quitar tapia del juego', photo: 'Mover foto', molino: 'Molino eólico' };
+const HINT = { wall: 'Toca punto a punto y pulsa Guardar', ruin: 'Toca punto a punto y pulsa Guardar', rock: 'Dibuja el contorno de las rocas', bld: 'Toca las esquinas del edificio', shape: 'Toca una casa y arrastra sus esquinas', gone: 'Toca la casa que sobra', tree: 'Dibuja el contorno de la zona', untree: 'Dibuja el contorno de la zona', paint: 'Arrastra para pintar; dos dedos o botón derecho para moverte', nivel: 'Dibuja el contorno de la zona que sube o baja', del: 'Toca algo tuyo para cambiarlo o borrarlo', unwall: 'Toca una tapia blanca discontinua', photo: 'Arrastra la foto o usa las flechas', molino: 'Toca el sitio del molino; aleja el plano para ver los montes' };
 function resize() { const r = map.getBoundingClientRect(), d = devicePixelRatio || 1; cv.width = r.width * d; cv.height = r.height * d; g.setTransform(d, 0, 0, d, 0, 0); draw(); }
 const W = () => cv.width / (devicePixelRatio || 1), H = () => cv.height / (devicePixelRatio || 1);
 const toS = (x, z) => [(x - view.cx) * view.s + W() / 2, (z - view.cz) * view.s + H() / 2];
@@ -33,6 +36,7 @@ function draw() {
   const parts0 = [];
   const css = getComputedStyle(document.documentElement), C = k => css.getPropertyValue(k).trim();
   g.fillStyle = '#3a3a36'; g.fillRect(0, 0, W(), H());
+  for (const [im, h] of [[imgFar, FAR], [imgPlano, PLANO], [imgMid, MID]]) if (im.complete && im.naturalWidth) { const [a, b] = toS(-h, -h); g.drawImage(im, a, b, 2 * h * view.s, 2 * h * view.s); }
   if (img.complete && img.naturalWidth) { const [a, b] = toS(off[0], off[1]); g.save(); g.translate(a, b); g.rotate(frot * Math.PI / 180); const L = B * fz * view.s; g.drawImage(img, -L, -L, 2 * L, 2 * L); g.restore(); }
   g.lineCap = 'round'; g.lineJoin = 'round';
   drawPaint();
@@ -76,6 +80,12 @@ function draw() {
     else { path(it.p); const wdt = { baja: 3, media: 5, alta: 8 }[it.alto] || 5; g.lineWidth = hi ? wdt + 4 : wdt; g.strokeStyle = hi ? '#4fc3f7' : (it.kind === 'ruin' ? C('--ruin') : it.mat === 'bloque' ? C('--block') : it.mat === 'irregular' ? C('--wallirr') : C('--wall'));
       if (it.kind === 'wall' && it.mat === 'irregular') g.setLineDash([wdt * 2.2, wdt * 0.9]); g.stroke(); g.setLineDash([]); }
   }
+  for (const it of items) if (it.kind === 'molino') { // el rotor a escala (86 m) y un punto rojo siempre visible
+    const hi = sel && sel.item === it, [a, b] = toS(it.p[0][0], it.p[0][1]), rr = ROTOR * view.s;
+    if (rr > 8) { g.beginPath(); g.arc(a, b, rr, 0, 7); g.setLineDash([6, 5]); g.lineWidth = 1.5; g.strokeStyle = 'rgba(255,255,255,0.8)'; g.stroke(); g.setLineDash([]); }
+    const L = Math.max(11, Math.min(rr, 40)); g.lineWidth = 3; g.strokeStyle = '#fff'; g.beginPath(); for (let k = 0; k < 3; k++) { const t = -Math.PI / 2 + k * 2.0944; g.moveTo(a, b); g.lineTo(a + L * Math.cos(t), b + L * Math.sin(t)); } g.stroke();
+    g.beginPath(); g.arc(a, b, hi ? 8 : 6, 0, 7); g.fillStyle = hi ? '#4fc3f7' : C('--mill'); g.fill(); g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke();
+  }
   if (editPts()) for (const q of sel.item.p) { const [a, b] = toS(q[0], q[1]); g.beginPath(); g.arc(a, b, 6, 0, 7); g.fillStyle = '#4fc3f7'; g.fill(); g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke(); }
   if (cur.length) {
     const cc = mode === 'wall' && $('wmat').value === 'bloque' ? C('--block') : mode === 'wall' && $('wmat').value === 'irregular' ? C('--wallirr') : mode === 'ruin' ? C('--ruin') : mode === 'bld' ? C('--bld') : mode === 'tree' ? C('--tree') : mode === 'untree' ? C('--gone') : mode === 'rock' ? C('--rock') : mode === 'nivel' ? C('--level') : C('--wall');
@@ -85,10 +95,11 @@ function draw() {
   }
   if (mode === 'paint' && hover) { const [a, b] = toS(hover[0], hover[1]); g.beginPath(); g.arc(a, b, Math.max(3, +$('brush').value * view.s), 0, 7); g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke(); g.setLineDash([3, 3]); g.strokeStyle = '#000'; g.stroke(); g.setLineDash([]); }
   // escala gráfica
-  const m = view.s > 3 ? 10 : view.s > 0.8 ? 50 : 100, x0 = 16, y0 = H() - 18;
-  g.fillStyle = '#fff'; g.fillRect(x0, y0, m * view.s, 4); g.font = '600 12px system-ui'; g.fillText(m + ' m', x0, y0 - 6);
+  const m = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000].find(v => v * view.s >= 50) || 5000, x0 = 16, y0 = H() - 18;
+  g.fillStyle = '#fff'; g.fillRect(x0, y0, m * view.s, 4); g.font = '600 12px system-ui'; g.fillText(m >= 1000 ? m / 1000 + ' km' : m + ' m', x0, y0 - 6);
   
-  const nL = items.filter(i => i.kind === 'wall' || i.kind === 'ruin').length, nB = items.filter(i => i.kind === 'building').length, nR = items.filter(i => i.kind === 'rocks').length, nS = items.filter(i => i.kind === 'suelo').length, nV = items.filter(i => i.kind === 'nivel').length, nZ = items.length - nL - nB - nR - nS - nV, parts = [];
+  const nL = items.filter(i => i.kind === 'wall' || i.kind === 'ruin').length, nB = items.filter(i => i.kind === 'building').length, nR = items.filter(i => i.kind === 'rocks').length, nS = items.filter(i => i.kind === 'suelo').length, nV = items.filter(i => i.kind === 'nivel').length, nM = items.filter(i => i.kind === 'molino').length, nZ = items.length - nL - nB - nR - nS - nV - nM, parts = [];
+  if (nM) parts0.push(nM + (nM === 1 ? ' molino' : ' molinos'));
   if (nS) parts0.push(nS + (nS === 1 ? ' trazo de suelo' : ' trazos de suelo')); if (nV) parts0.push(nV + (nV === 1 ? ' desnivel' : ' desniveles'));
   if (nR) parts0.push(nR + (nR === 1 ? ' zona de rocas' : ' zonas de rocas'));
   if (nZ) parts0.push(nZ + (nZ === 1 ? ' zona de árboles' : ' zonas de árboles'));
@@ -101,12 +112,12 @@ function draw() {
   $('bSave').textContent = mode === 'bld' ? 'Guardar edificio' : area() ? 'Guardar zona' : 'Guardar línea'; $('bSave').hidden = !drawing();
 }
 function setMode(m) {
-  mode = m; for (const [id, k] of [['bWall', 'wall'], ['bRuin', 'ruin'], ['bBld', 'bld'], ['bGone', 'gone'], ['bDel', 'del'], ['bPhoto', 'photo'], ['bTree', 'tree'], ['bUntree', 'untree'], ['bUnwall', 'unwall'], ['bRock', 'rock'], ['bShape', 'shape'], ['bPaint', 'paint'], ['bNivel', 'nivel']]) $(id).setAttribute('aria-pressed', String(k === m));
+  mode = m; for (const [id, k] of [['bWall', 'wall'], ['bRuin', 'ruin'], ['bBld', 'bld'], ['bGone', 'gone'], ['bDel', 'del'], ['bPhoto', 'photo'], ['bTree', 'tree'], ['bUntree', 'untree'], ['bUnwall', 'unwall'], ['bRock', 'rock'], ['bShape', 'shape'], ['bPaint', 'paint'], ['bNivel', 'nivel'], ['bMolino', 'molino']]) $(id).setAttribute('aria-pressed', String(k === m));
   $('nudge').hidden = m !== 'photo'; $('paintBar').hidden = m !== 'paint'; $('nivelBar').hidden = m !== 'nivel'; $('toolName').textContent = TOOL[m]; status(HINT[m]); cv.style.cursor = m === 'paint' ? 'none' : 'crosshair';
   $('floors').hidden = m !== 'bld'; $('wmat').hidden = m !== 'wall'; $('whigh').hidden = !['wall', 'ruin', 'rock'].includes(m);
   if (!drawing()) cur = []; sel = null; $('confirm').hidden = true; $('edit').hidden = true; $('shapeBar').hidden = true; draw();
 }
-for (const [id, k] of [['bWall', 'wall'], ['bRuin', 'ruin'], ['bBld', 'bld'], ['bGone', 'gone'], ['bDel', 'del'], ['bPhoto', 'photo'], ['bTree', 'tree'], ['bUntree', 'untree'], ['bUnwall', 'unwall'], ['bRock', 'rock'], ['bShape', 'shape'], ['bPaint', 'paint'], ['bNivel', 'nivel']]) $(id).onclick = () => setMode(k);
+for (const [id, k] of [['bWall', 'wall'], ['bRuin', 'ruin'], ['bBld', 'bld'], ['bGone', 'gone'], ['bDel', 'del'], ['bPhoto', 'photo'], ['bTree', 'tree'], ['bUntree', 'untree'], ['bUnwall', 'unwall'], ['bRock', 'rock'], ['bShape', 'shape'], ['bPaint', 'paint'], ['bNivel', 'nivel'], ['bMolino', 'molino']]) $(id).onclick = () => setMode(k);
 // ajuste de la foto: flechas de 25 cm (norte arriba) y arrastre
 const showOff = () => { $('offTxt').textContent = (off[0] >= 0 ? '+' : '') + off[0].toFixed(2) + ' E, ' + (-off[1] >= 0 ? '+' : '') + (-off[1]).toFixed(2) + ' N m · ' + (fz * 100).toFixed(1) + ' % · ' + frot.toFixed(1) + '°'; };
 for (const [id, k] of [['zIn', 1.002], ['zOut', 1 / 1.002]]) $(id).onclick = () => { fz *= k; showOff(); draw(); };
@@ -193,7 +204,7 @@ async function resetAll() {
   cur = []; draw(); status(bad ? `Quedan ${bad} cosas sin borrar: vuelve a pulsar Empezar de cero` : 'Plano limpio: empieza de cero');
 }
 // panel de edición de lo mío: cambiar tipo, material, altura o plantas, o borrarlo
-const KINDS = { wall: 'Tapia', ruin: 'Ruina', building: 'Edificio', rocks: 'Rocas', grove: 'Zona de árboles', clear: 'Zona sin árboles', suelo: 'Trazo de suelo', nivel: 'Desnivel' };
+const KINDS = { wall: 'Tapia', ruin: 'Ruina', building: 'Edificio', rocks: 'Rocas', grove: 'Zona de árboles', clear: 'Zona sin árboles', suelo: 'Trazo de suelo', nivel: 'Desnivel', molino: 'Molino' };
 $('eDh').innerHTML = $('dh').innerHTML; $('eTalud').innerHTML = $('talud').innerHTML;
 function openEdit(it) {
   const line = it.kind === 'wall' || it.kind === 'ruin';
@@ -253,7 +264,7 @@ cv.addEventListener('pointermove', e => {
   if (stroke && ptrs.size === 1) { const p = toW(e.offsetX, e.offsetY), q = stroke.p[stroke.p.length - 1]; if (Math.hypot(p[0] - q[0], p[1] - q[1]) > Math.max(0.3, stroke.r * 0.35)) stroke.p.push(p); draw(); return; }
   if (pinch && ptrs.size === 2) {
     const [a, b] = [...ptrs.values()], mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    view.s = Math.min(12, Math.max(0.6, pinch.s * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d));
+    view.s = Math.min(12, Math.max(0.025, pinch.s * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d));
     const w1 = toW(...mid); view.cx += pinch.w[0] - w1[0]; view.cz += pinch.w[1] - w1[1]; draw(); return;
   }
   if (drag) { const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y; if (Math.hypot(dx, dy) > 7) drag.moved = true; if (drag.moved) { if (drag.pt) { drag.pt.arr[drag.pt.i] = toW(e.offsetX, e.offsetY); } else if (mode === 'photo' && !drag.pan) { off = [drag.ox + dx / view.s, drag.oz + dy / view.s]; showOff(); } else { view.cx = drag.cx - dx / view.s; view.cz = drag.cz - dy / view.s; } draw(); } }
@@ -263,7 +274,7 @@ cv.addEventListener('pointerup', e => { const d = drag; ptrs.delete(e.pointerId)
 cv.addEventListener('pointercancel', e => { ptrs.delete(e.pointerId); drag = null; pinch = null; stroke = null; draw(); });
 cv.addEventListener('wheel', e => {
   e.preventDefault(); const w0 = toW(e.offsetX, e.offsetY);
-  view.s = Math.min(12, Math.max(0.6, view.s * Math.exp(-e.deltaY * 0.0015)));
+  view.s = Math.min(12, Math.max(0.025, view.s * Math.exp(-e.deltaY * 0.0015)));
   const w1 = toW(e.offsetX, e.offsetY); view.cx += w0[0] - w1[0]; view.cz += w0[1] - w1[1]; draw();
 }, { passive: false });
 function tap(px, py) {
@@ -296,8 +307,9 @@ function tap(px, py) {
   }
   if (mode === 'del') { // lo mío más cercano: un edificio que contenga el toque o la línea más próxima
     let best = null, bd = 14 / view.s;
+    for (const it of items) if (it.kind === 'molino') { const d = Math.hypot(x - it.p[0][0], z - it.p[0][1]); if (d < Math.max(bd, 16 / view.s)) { bd = d; best = it; } } bd = 14 / view.s;
     for (let k = items.length - 1; k >= 0 && !best; k--) { const it = items[k]; if (it.kind === 'suelo') for (let i = 0; i < it.p.length; i++) { const a = it.p[Math.max(0, i - 1)], b = it.p[i], dx = b[0] - a[0], dz = b[1] - a[1], L = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L)); if (Math.hypot(x - a[0] - dx * t, z - a[1] - dz * t) < it.r + 4 / view.s) { best = it; break; } } }
-    if (!best) best = items.find(it => !['wall', 'ruin', 'suelo', 'nivel'].includes(it.kind) && inside([x, z], it.p)) || items.find(it => it.kind === 'nivel' && inside([x, z], it.p)) || null;
+    if (!best) best = items.find(it => !['wall', 'ruin', 'suelo', 'nivel', 'molino'].includes(it.kind) && inside([x, z], it.p)) || items.find(it => it.kind === 'nivel' && inside([x, z], it.p)) || null;
     if (!best) for (const l of items) if (l.kind === 'wall' || l.kind === 'ruin') for (let i = 0; i < l.p.length - 1; i++) {
       const a = l.p[i], b = l.p[i + 1], dx = b[0] - a[0], dz = b[1] - a[1], L = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L)), d = Math.hypot(x - a[0] - dx * t, z - a[1] - dz * t);
       if (d < bd) { bd = d; best = l; }
@@ -306,9 +318,34 @@ function tap(px, py) {
     if (best) openEdit(best); else { $('edit').hidden = true; draw(); }
     return;
   }
-  if (Math.abs(x) > B || Math.abs(z) > B) return;
+  if (mode === 'molino') { // un toque y queda guardado
+    if (Math.abs(x) > FAR || Math.abs(z) > FAR) { status('Fuera del mapa: el molino tiene que estar a menos de 10 km del pueblo'); return; }
+    if (!col) { status('Sin conexión: el molino no se ha guardado'); return; }
+    const doc = { kind: 'molino', xy: [Math.round(x), Math.round(z)], at: Date.now() }, id = newId(); status('Guardando molino…');
+    col.doc(id).set(doc).then(() => { push(() => col.doc(id).delete(), null, () => col.doc(id).set(doc)); status('Molino guardado. Toca otro sitio para poner más'); }, e => status('No se ha podido guardar el molino (' + (e.message || e.code) + ')'));
+    return;
+  }
+  if (Math.abs(x) > EDIT || Math.abs(z) > EDIT) { status('Fuera del plano: se puede dibujar hasta 4 km del pueblo'); return; }
   const arr = cur, pt = [x, z]; cur.push(pt); push(() => { arr.pop(); }, () => cur === arr && arr.length > 0, () => { arr.push(pt); }); draw();
 }
+// coordenadas bajo el ratón (o el dedo): latitud/longitud y UTM 30N (ETRS89), como los datos del IGN y el Catastro
+const UTM0 = [233830.73, 4650998.60]; // el centro del juego (0, 0)
+function utmToGeo(E, N) {
+  const k0 = 0.9996, a = 6378137, f = 1 / 298.257222101, e2 = f * (2 - f), ep2 = e2 / (1 - e2), x = E - 500000, M = N / k0;
+  const mu = M / (a * (1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * e2 ** 3 / 256)), r = Math.sqrt(1 - e2), e1 = (1 - r) / (1 + r);
+  const p1 = mu + (3 * e1 / 2 - 27 * e1 ** 3 / 32) * Math.sin(2 * mu) + (21 * e1 * e1 / 16 - 55 * e1 ** 4 / 32) * Math.sin(4 * mu) + (151 * e1 ** 3 / 96) * Math.sin(6 * mu) + (1097 * e1 ** 4 / 512) * Math.sin(8 * mu);
+  const sn = Math.sin(p1), cs = Math.cos(p1), C1 = ep2 * cs * cs, T1 = Math.tan(p1) ** 2, w = 1 - e2 * sn * sn, N1 = a / Math.sqrt(w), R1 = a * (1 - e2) / w ** 1.5, D = x / (N1 * k0);
+  const lat = p1 - (N1 * Math.tan(p1) / R1) * (D * D / 2 - (5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * ep2) * D ** 4 / 24 + (61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 252 * ep2 - 3 * C1 * C1) * D ** 6 / 720);
+  const lon = -3 * Math.PI / 180 + (D - (1 + 2 * T1 + C1) * D ** 3 / 6 + (5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * ep2 + 24 * T1 * T1) * D ** 5 / 120) / cs;
+  return [lat * 180 / Math.PI, lon * 180 / Math.PI];
+}
+function showCoord(px, py) {
+  const [x, z] = toW(px, py), E = UTM0[0] + x, N = UTM0[1] - z, [la, lo] = utmToGeo(E, N), d = Math.hypot(x, z);
+  $('coord').hidden = false;
+  $('coord').textContent = `${Math.abs(la).toFixed(5)}° ${la >= 0 ? 'N' : 'S'}, ${Math.abs(lo).toFixed(5)}° ${lo >= 0 ? 'E' : 'O'} · UTM 30N ${Math.round(E)} E ${Math.round(N)} N · ${d < 1000 ? Math.round(d) + ' m' : (d / 1000).toFixed(2).replace('.', ',') + ' km'} del centro`;
+}
+cv.addEventListener('pointermove', e => showCoord(e.offsetX, e.offsetY));
+cv.addEventListener('pointerdown', e => showCoord(e.offsetX, e.offsetY));
 addEventListener('resize', resize); resize();
 // botón Generar el juego: deja un comentario para Claude, que lee el plano y vuelve a publicar el juego
 (async () => {
@@ -332,7 +369,7 @@ addEventListener('resize', resize); resize();
   col = db.collection('trazos'); colGone = db.collection('quitar'); draw();
   col.onSnapshot(snap => {
     clearTimeout(t);
-    items = snap.docs.map(d => { const v = d.data(), xy = v.xy || [], p = []; for (let i = 0; i + 1 < xy.length; i += 2) p.push([xy[i], xy[i + 1]]); return { id: d.id, raw: v, kind: v.kind, floors: v.floors || 2, mat: v.mat || 'piedra', alto: v.alto || 'media', r: v.r || 2, dh: v.dh ?? 1, talud: v.talud || 'medio', at: v.at || 0, p }; }).filter(l => l.p.length > (l.kind === 'suelo' ? 0 : 1)).sort((a, b) => a.at - b.at);
+    items = snap.docs.map(d => { const v = d.data(), xy = v.xy || [], p = []; for (let i = 0; i + 1 < xy.length; i += 2) p.push([xy[i], xy[i + 1]]); return { id: d.id, raw: v, kind: v.kind, floors: v.floors || 2, mat: v.mat || 'piedra', alto: v.alto || 'media', r: v.r || 2, dh: v.dh ?? 1, talud: v.talud || 'medio', at: v.at || 0, p }; }).filter(l => l.p.length > (l.kind === 'suelo' || l.kind === 'molino' ? 0 : 1)).sort((a, b) => a.at - b.at);
     status('Todo guardado'); draw();
   }, e => { clearTimeout(t); status('No se pueden leer los trazos (' + (e.message || e.code) + ')'); });
   db.collection('ajuste').doc('foto').get().then(d => { if (d.exists) { const v = d.data(); off = [v.dx || 0, v.dz || 0]; fz = v.scale || 1; frot = v.rot || 0; offSaved = off.slice(); showOff(); draw(); } }).catch(() => {});
