@@ -291,7 +291,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
       else player.pos.copy(flying.pos);
     }
     else if (driving) driving.update(dt, input, camState.yaw); else player.update(dt, input, camState.yaw);
-    molinos.update(dt, dayNight.n);
+    molinos.update(dt, dayNight.n, camera);
     if (!flying) plane?.update(0, null); // la hélice y la postura cuando está aparcada
     for (const c of cars) if (c !== driving && !c.police) {
       c.update(dt, null);

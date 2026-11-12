@@ -27,6 +27,7 @@ function bladeGeometry() {
   g.computeVertexNormals(); return g;
 }
 
+const _v = new THREE.Vector3();
 export class Molinos {
   constructor(list, terrain, colliders) {
     this.group = new THREE.Group(); this.list = []; this.t = 0;
@@ -48,6 +49,11 @@ export class Molinos {
     // baliza roja de noche (encima de la góndola)
     this.lightMat = new THREE.MeshBasicMaterial({ color: 0xff2015, fog: false, transparent: true });
     const lampGeo = new THREE.SphereGeometry(1.1, 10, 8);
+    // resplandor de la baliza: un halo rojo que se ve aunque el molino esté a kilómetros
+    const cv = document.createElement('canvas'); cv.width = cv.height = 64; const cg = cv.getContext('2d'), gr = cg.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,90,70,1)'); gr.addColorStop(0.18, 'rgba(255,30,20,0.85)'); gr.addColorStop(0.5, 'rgba(255,0,0,0.18)'); gr.addColorStop(1, 'rgba(255,0,0,0)'); cg.fillStyle = gr; cg.fillRect(0, 0, 64, 64);
+    this.glowMat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), color: 0xffffff, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true });
+    this.glows = [];
     for (const [x, z] of list) {
       const y = terrain.ground(x, z), yaw = YAW + Math.sin(x * 0.013 + z * 0.021) * 0.12;
       const root = new THREE.Group(); root.position.set(x, y, z); root.rotation.y = yaw;
@@ -55,6 +61,7 @@ export class Molinos {
       const bs = new THREE.Mesh(base, grey); bs.receiveShadow = true; root.add(bs);
       const rotor = new THREE.Mesh(rotorGeo, white); rotor.position.set(0, HUB, -3.4); rotor.rotation.z = Math.random() * 6.28; rotor.castShadow = true; root.add(rotor);
       const lamp = new THREE.Mesh(lampGeo, this.lightMat); lamp.position.set(0, HUB + 5.4, 8); root.add(lamp);
+      const glow = new THREE.Sprite(this.glowMat); glow.position.copy(lamp.position); glow.renderOrder = 2; root.add(glow); this.glows.push(glow);
       for (const o of [tw, bs, rotor, lamp]) o.frustumCulled = true;
       this.group.add(root);
       // el rotor, en coordenadas del mundo: centro y eje (hacia donde mira)
@@ -67,12 +74,15 @@ export class Molinos {
     }
   }
   // giro de las palas (sentido horario visto de frente) y la baliza que parpadea de noche, todas a la vez
-  update(dt, night = 0) {
+  update(dt, night = 0, camera = null) {
     if (!this.list.length) return;
     this.t += dt;
     for (const m of this.list) m.rotor.rotation.z -= m.speed * dt;
-    const on = night > 0.3 && (this.t % 2) < 1;
-    this.lightMat.opacity = on ? 1 : 0; this.lightMat.visible = on;
+    // pulso de baliza: sube, se mantiene y se apaga despacio cada 2 s, todos los molinos a la vez
+    const ph = this.t % 2, k = ph < 0.25 ? ph / 0.25 : ph < 0.75 ? 1 : ph < 1.25 ? 1 - (ph - 0.75) / 0.5 : 0, lit = night > 0.3;
+    const a = lit ? k * k * (3 - 2 * k) : 0;
+    this.lightMat.visible = this.glowMat.visible = a > 0.01; this.lightMat.opacity = a; this.glowMat.opacity = a;
+    if (a > 0.01 && camera) for (const gl of this.glows) { const d = camera.position.distanceTo(gl.getWorldPosition(_v)); gl.scale.setScalar(Math.max(12, d * 0.03)); }
   }
   // ¿un punto (la avioneta) choca con un molino? devuelve el motivo o null
   hit(p) {
