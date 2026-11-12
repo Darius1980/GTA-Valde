@@ -95,6 +95,21 @@ for i in range(2):
             except Exception as e:
                 print("pnoa fail", i, j, e, flush=True); time.sleep(10)
 
+# --- Ortofoto del plano editable (radio de 4 km, ~2 m/px): 4 teselas de 4 km y 2048 px
+PH = 4000
+for i in range(2):
+    for j in range(2):
+        f = f"ortho_p_{i}_{j}.jpg"
+        if have(f): continue
+        bx0, by0 = cx - PH + i * PH, cy - PH + j * PH
+        url = "https://www.ign.es/wms-inspire/pnoa-ma?" + urllib.parse.urlencode({
+            "SERVICE": "WMS", "VERSION": "1.3.0", "REQUEST": "GetMap", "LAYERS": "OI.OrthoimageCoverage",
+            "STYLES": "", "CRS": "EPSG:25830", "BBOX": f"{bx0},{by0},{bx0 + PH},{by0 + PH}",
+            "WIDTH": 2048, "HEIGHT": 2048, "FORMAT": "image/jpeg"})
+        for k in range(3):
+            try: save(f, get(url)); break
+            except Exception as e: print("pnoa plano fail", i, j, e, flush=True); time.sleep(10)
+
 # --- Ortofoto de detalle (0,8 m/px) de 1,6 km alrededor de cada pueblo, para verlo bien de cerca
 try:
     _osm = json.load(open(os.path.join(OUT, "osm.json")))["elements"]
