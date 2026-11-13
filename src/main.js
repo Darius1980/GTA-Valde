@@ -269,11 +269,14 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     document.getElementById('lmsg').textContent = '¿En qué pueblo empiezas?';
     list.forEach(v => {
       const b = document.createElement('button'), km = Math.hypot(v.c[0] - home.c[0], v.c[1] - home.c[1]) / 1000;
-      b.innerHTML = `<b></b><span>${v.main ? 'Pueblo principal' : `${km.toFixed(1)} km de Valde${v.big ? '' : ' · aldea'}`}</span>`;
+      b.innerHTML = `<b></b><span>${v.main ? 'principal' : `${km.toFixed(1).replace('.', ',')} km${v.big ? '' : ' · aldea'}`}</span>`;
       b.querySelector('b').textContent = v.name; if (v.name === last) b.classList.add('last');
       b.addEventListener('click', () => { menu.hidden = true; startAt(v); });
       menu.appendChild(b);
     });
+    // con la rueda del ratón también se desplaza en horizontal; el último pueblo elegido queda a la vista
+    menu.addEventListener('wheel', e => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { menu.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
+    menu.querySelector('.last')?.scrollIntoView({ inline: 'center', block: 'nearest' });
   } else loading.classList.add('done');
   if (outer && Math.max(Math.abs(player.pos.x), Math.abs(player.pos.z)) > 1500) outer.prime(player.pos, dayNight.far);
   if (data.style === 'urban') { scene.fog.color.set(0xc4ccd4); su.turbidity.value = 7; sun.intensity = 2.2; }
