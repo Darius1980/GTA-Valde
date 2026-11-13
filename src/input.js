@@ -44,7 +44,7 @@ export class Input {
         if (t.identifier === stickId) this.#stickMove(t, sx, sy, R, knob);
         else if (t.identifier === lookId) { this.look.dx += (t.clientX - lx) * 1.6; this.look.dy += (t.clientY - ly) * 1.6; lx = t.clientX; ly = t.clientY; }
       }
-      e.preventDefault();
+      if (!e.target.closest?.('#maps')) e.preventDefault(); // la lista de pueblos de salida sí se desplaza con el dedo
     }, { passive: false });
     const end = e => {
       for (const t of e.changedTouches) {

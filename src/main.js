@@ -274,9 +274,8 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
       b.addEventListener('click', () => { menu.hidden = true; startAt(v); });
       menu.appendChild(b);
     });
-    // con la rueda del ratón también se desplaza en horizontal; el último pueblo elegido queda a la vista
-    menu.addEventListener('wheel', e => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { menu.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
-    menu.querySelector('.last')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+    // el último pueblo elegido queda a la vista
+    menu.querySelector('.last')?.scrollIntoView({ block: 'center', inline: 'nearest' });
   } else loading.classList.add('done');
   if (outer && Math.max(Math.abs(player.pos.x), Math.abs(player.pos.z)) > 1500) outer.prime(player.pos, dayNight.far);
   if (data.style === 'urban') { scene.fog.color.set(0xc4ccd4); su.turbidity.value = 7; sun.intensity = 2.2; }

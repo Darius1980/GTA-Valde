@@ -110,10 +110,10 @@ body.touch #fs { top: auto; right: auto; left: 50%; transform: translateX(-50%);
 body.touch #offer { bottom: auto; top: 42%; font-size: 14px; }
 body.touch #offer small { display: none; }
 
-/* elección del pueblo de salida: una fila que se desplaza en horizontal, un pueblo por botón en una línea */
-#maps.starts { display: flex; flex-direction: row; flex-wrap: nowrap; justify-content: flex-start; gap: 8px; width: min(900px, 100%); overflow-x: auto; overflow-y: hidden; touch-action: pan-x; padding: 4px 2px 10px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+/* elección del pueblo de salida: una columna con desplazamiento vertical, un pueblo por línea */
+#maps.starts { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; justify-content: flex-start; gap: 6px; width: min(380px, 100%); max-height: 46vh; overflow-y: auto; overflow-x: hidden; touch-action: pan-y; padding: 2px 6px 2px 2px; -webkit-overflow-scrolling: touch; }
 #maps.starts[hidden] { display: none; }
-#maps.starts button { flex: 0 0 auto; width: auto; flex-direction: row; align-items: baseline; gap: 8px; white-space: nowrap; padding: 8px 14px; scroll-snap-align: start; }
-#maps.starts b { font-size: 17px; }
-#maps.starts span { font-size: 12px; }
+#maps.starts button { flex: 0 0 auto; width: 100%; flex-direction: row; align-items: baseline; justify-content: space-between; gap: 8px; white-space: nowrap; padding: 8px 14px; }
+#maps.starts b { font-size: 17px; overflow: hidden; text-overflow: ellipsis; }
+#maps.starts span { font-size: 12px; flex: 0 0 auto; }
 #maps.starts button.last { background: rgba(245,197,66,.25); }
