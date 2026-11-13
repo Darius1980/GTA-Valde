@@ -244,8 +244,37 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   const camState = { yaw: player.heading + Math.PI, pitch: 0.25, dist: 4.6, pos: new THREE.Vector3() };
   camera.position.copy(player.pos).add(new THREE.Vector3(0, 3, -6));
 
-  loading.classList.add('done');
   const placeEl = document.getElementById('place'); placeEl.textContent = data.title;
+  // salida: se elige el pueblo donde empezar (con un coche aparcado al lado)
+  const startAt = (v) => {
+    if (!v.main) {
+      const n = v.node, nb = region.adj[n][0]?.[0] ?? n, [x, z] = region.nodePos(n), [x2, z2] = region.nodePos(nb);
+      const h = Math.atan2(x2 - x, z2 - z), sx = Math.cos(h), sz = -Math.sin(h); // a la derecha de la calle
+      const cx = x + sx * 2, cz = z + sz * 2, px = x - sx * 2.5, pz = z - sz * 2.5;
+      player.pos.set(px, terrain.height(px, pz), pz); player.heading = h;
+      outer.prime(player.pos, dayNight.far);
+      const c = spawnVehicle(Math.random() < 0.3 ? 'suv' : 'sedan', palette[Math.random() * palette.length | 0], cx, cz, h); c.home = [cx, cz, h];
+      camState.yaw = h + Math.PI; camera.position.copy(player.pos).add(new THREE.Vector3(-Math.sin(h) * 6, 3, -Math.cos(h) * 6));
+      placeEl.textContent = v.name;
+    }
+    loading.classList.add('done');
+    try { localStorage.setItem('valde.start', v.name); } catch (_) {}
+  };
+  const menu = document.getElementById('maps');
+  if (region && region.villages.length > 1) {
+    let last = null; try { last = localStorage.getItem('valde.start'); } catch (_) {}
+    const home = region.villages.find(v => v.main), list = [...region.villages].sort((a, b) => (!!b.main - !!a.main) || (!!b.big - !!a.big) || a.name.localeCompare(b.name, 'es'));
+    menu.innerHTML = ''; menu.classList.add('starts'); menu.hidden = false;
+    document.querySelector('#loading .track').style.display = 'none';
+    document.getElementById('lmsg').textContent = '¿En qué pueblo empiezas?';
+    list.forEach(v => {
+      const b = document.createElement('button'), km = Math.hypot(v.c[0] - home.c[0], v.c[1] - home.c[1]) / 1000;
+      b.innerHTML = `<b></b><span>${v.main ? 'Pueblo principal' : `${km.toFixed(1)} km de Valde${v.big ? '' : ' · aldea'}`}</span>`;
+      b.querySelector('b').textContent = v.name; if (v.name === last) b.classList.add('last');
+      b.addEventListener('click', () => { menu.hidden = true; startAt(v); });
+      menu.appendChild(b);
+    });
+  } else loading.classList.add('done');
   if (outer && Math.max(Math.abs(player.pos.x), Math.abs(player.pos.z)) > 1500) outer.prime(player.pos, dayNight.far);
   if (data.style === 'urban') { scene.fog.color.set(0xc4ccd4); su.turbidity.value = 7; sun.intensity = 2.2; }
   document.getElementById('help').classList.add('show');

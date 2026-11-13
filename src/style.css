@@ -109,3 +109,10 @@ body.touch #fs { top: auto; right: auto; left: 50%; transform: translateX(-50%);
 #offer small { font-weight: 500; opacity: .7; }
 body.touch #offer { bottom: auto; top: 42%; font-size: 14px; }
 body.touch #offer small { display: none; }
+
+/* elección del pueblo de salida */
+#maps.starts { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 8px; width: min(720px, 100%); max-height: 52vh; overflow-y: auto; touch-action: pan-y; padding: 2px; }
+#maps.starts[hidden] { display: none; }
+#maps.starts button { width: auto; padding: 8px 12px; }
+#maps.starts b { font-size: 17px; }
+#maps.starts button.last { background: rgba(245,197,66,.25); }
