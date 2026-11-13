@@ -131,6 +131,33 @@ for vid, e_, n_ in vill:
         try: save(f, get(url)); break
         except Exception as ex: print("pnoa village fail", vid, ex, flush=True); time.sleep(10)
 
+# --- Ortofoto media (~2 m/px) de todo el entorno: 10 x 10 teselas de 2 km a 1024 px, se cargan por zonas
+MT = 2000
+for i in range(int(2 * HALF // MT)):
+    for j in range(int(2 * HALF // MT)):
+        f = f"ortho_m_{i}_{j}.jpg"
+        if have(f): continue
+        bx0, by0 = x0 + i * MT, y0 + j * MT
+        url = "https://www.ign.es/wms-inspire/pnoa-ma?" + urllib.parse.urlencode({
+            "SERVICE": "WMS", "VERSION": "1.3.0", "REQUEST": "GetMap", "LAYERS": "OI.OrthoimageCoverage",
+            "STYLES": "", "CRS": "EPSG:25830", "BBOX": f"{bx0},{by0},{bx0 + MT},{by0 + MT}",
+            "WIDTH": 1024, "HEIGHT": 1024, "FORMAT": "image/jpeg"})
+        for k in range(3):
+            try: save(f, get(url)); break
+            except Exception as e: print("pnoa media fail", i, j, e, flush=True); time.sleep(10)
+
+# --- Ortofoto fina (~0,5 m/px) del casco de cada pueblo: 1 km a 2048 px
+for vid, e_, n_ in vill:
+    f = f"ortho_w_{vid}.jpg"
+    if have(f): continue
+    url = "https://www.ign.es/wms-inspire/pnoa-ma?" + urllib.parse.urlencode({
+        "SERVICE": "WMS", "VERSION": "1.3.0", "REQUEST": "GetMap", "LAYERS": "OI.OrthoimageCoverage",
+        "STYLES": "", "CRS": "EPSG:25830", "BBOX": f"{e_ - 500},{n_ - 500},{e_ + 500},{n_ + 500}",
+        "WIDTH": 2048, "HEIGHT": 2048, "FORMAT": "image/jpeg"})
+    for k in range(3):
+        try: save(f, get(url)); break
+        except Exception as ex: print("pnoa casco fail", vid, ex, flush=True); time.sleep(10)
+
 # --- Catastro en torno a cada pueblo
 if CFG.get("catastro") and not glob.glob(os.path.join(OUT, "cbp_*.gml")):
     try:
