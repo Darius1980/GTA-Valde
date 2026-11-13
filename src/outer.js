@@ -172,6 +172,7 @@ export class Outer {
     });
   }
   build(T) {
+    this.colliders.record(true);
     const g = new THREE.Group();
     if (T.roads.length) g.add(buildRoads({ roads: T.roads, style: 'rural', step: 6, lift: 0.14 }, this.terrain, this.tex, null));
     if (T.rivers) g.add(this.riverMesh(T.rivers));
@@ -190,7 +191,15 @@ export class Outer {
       crowns.castShadow = true; g.add(trunks, crowns);
     }
     this.share(g);
+    T.cols = this.colliders.record(false);
     T.obj = g; T.built = true; this.group.add(g);
+  }
+  // tesela que ha quedado muy atrás: se libera su memoria (geometrías en la GPU y colisiones); se reconstruye si vuelves
+  free(T) {
+    this.group.remove(T.obj);
+    T.obj.traverse(o => { o.geometry?.dispose(); if (o.isInstancedMesh) o.dispose(); });
+    this.colliders.removeRecorded(T.cols);
+    T.obj = null; T.built = false; T.cols = null;
   }
   // visibilidad por distancia (la niebla tapa lo de más allá) y construcción progresiva
   update(pos, far) {
@@ -207,7 +216,7 @@ export class Outer {
     const want = [];
     for (const T of this.tiles.values()) {
       const dx = Math.max(Math.abs(pos.x - T.cx) - TILE / 2, 0), dz = Math.max(Math.abs(pos.z - T.cz) - TILE / 2, 0), d = Math.hypot(dx, dz);
-      if (T.built) T.obj.visible = d < R;
+      if (T.built) { T.obj.visible = d < R; if (d > R + 1500) this.free(T); }
       else if (d < R + 300 && !this.queue.includes(T)) want.push([d, T]);
     }
     want.sort((a, b) => a[0] - b[0]); for (const [, T] of want) this.queue.push(T);

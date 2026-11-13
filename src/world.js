@@ -73,6 +73,16 @@ export class Colliders {
     const j0 = Math.floor(Math.min(az, bz) / c), j1 = Math.floor(Math.max(az, bz) / c);
     for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
       const k = this.key(i, j); if (!this.map.has(k)) this.map.set(k, []); this.map.get(k).push(seg);
+      this.rec?.push([this.map, k, seg]);
+    }
+  }
+  // las teselas lejanas apuntan lo que añaden para poder quitarlo al liberarlas
+  record(on) { const r = this.rec; this.rec = on ? [] : null; return r; }
+  removeRecorded(list) {
+    const set = new Set(list.map(r => r[2])), done = new Set();
+    for (const [m, k] of list) {
+      if (done.has(m.get(k))) continue; const l = m.get(k); if (!l) continue;
+      const f = l.filter(x => !set.has(x)); done.add(f); if (f.length) m.set(k, f); else m.delete(k);
     }
   }
   // planta de un edificio, para saber si un punto ha quedado dentro (los muros son solo segmentos finos)
@@ -82,6 +92,7 @@ export class Colliders {
     const a = { pts, x0, x1, z0, z1 }, c = this.cell; this.areas = this.areas || new Map();
     for (let i = Math.floor(x0 / c); i <= Math.floor(x1 / c); i++) for (let j = Math.floor(z0 / c); j <= Math.floor(z1 / c); j++) {
       const k = this.key(i, j); if (!this.areas.has(k)) this.areas.set(k, []); this.areas.get(k).push(a);
+      this.rec?.push([this.areas, k, a]);
     }
   }
   inside(x, z) {

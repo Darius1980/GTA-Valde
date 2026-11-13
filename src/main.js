@@ -198,7 +198,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     scene, world, roads: data.roads, center: data.plaza?.start || data.spawn, start: data.race_start || [data.spawn[0] + 20, data.spawn[1] + 10], ui, sound: k => engine.blip(k), toast: (a, b) => missions.toast(a, b),
     makeCar: (col) => { const c = new Car(world, col, 'sedan', data.carScale || 1); scene.add(c.mesh); cars.push(c); return c; },
   });
-  race.onRemove = (c) => { scene.remove(c.mesh); for (const sp of c.smoke) scene.remove(sp); const i = cars.indexOf(c); if (i >= 0 && c !== driving) cars.splice(i, 1); };
+  race.onRemove = (c) => { scene.remove(c.mesh); c.mesh.traverse(o => o.geometry?.dispose()); for (const sp of c.smoke) { scene.remove(sp); sp.material.dispose(); } const i = cars.indexOf(c); if (i >= 0 && c !== driving) cars.splice(i, 1); };
   race.onPrize = (p) => { missions.money += p; };
   if (region) race.addInterVillage(region);
   const toast = (a, b) => missions.toast(a, b), sound = k => engine.blip(k);
@@ -387,7 +387,11 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
       }
       // en el agua el coche se hunde y frena
       if (driving && (frameNo & 3) === 0) { const wy = outer.waterAt(p.x, p.z); if (wy != null && p.y < wy + 0.3) { driving.speed *= 0.7; if (Math.abs(driving.speed) < 0.5 && (frameNo & 127) === 0) toast('¡Al agua!', 'Los coches no flotan: sal marcha atrás'); } }
-      if ((frameNo & 31) === 0) { const nm = outer.placeName(target.x, target.z) || data.title; if (placeEl.textContent !== nm) placeEl.textContent = nm; }
+      if ((frameNo & 31) === 0) { // el pueblo más cercano; fuera del casco, con la distancia
+        const v = region?.villageAt(target.x, target.z, Infinity), d = v ? Math.hypot(v.c[0] - target.x, v.c[1] - target.z) : 0;
+        const nm = !v ? (outer.placeName(target.x, target.z) || data.title) : d < 650 ? v.name : `${v.name} · ${(d / 1000).toFixed(1).replace('.', ',')} km`;
+        if (placeEl.textContent !== nm) placeEl.textContent = nm;
+      }
     }
     dayNight.update(dt, target);
     weather.inside = !!interiors.inside;

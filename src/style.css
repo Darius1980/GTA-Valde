@@ -117,3 +117,11 @@ body.touch #offer small { display: none; }
 #maps.starts b { font-size: 17px; overflow: hidden; text-overflow: ellipsis; }
 #maps.starts span { font-size: 12px; flex: 0 0 auto; }
 #maps.starts button.last { background: rgba(245,197,66,.25); }
+
+/* avisos para aceptar tareas: arriba en el centro, pequeños, sin tapar la carretera */
+#offer { top: max(10px, env(safe-area-inset-top)); bottom: auto; left: 50%; transform: translateX(-50%); max-width: min(34vw, 360px); padding: 5px 6px 5px 10px; font-size: 13px; gap: 6px; border-radius: 12px; }
+#offer span { white-space: normal; line-height: 1.2; }
+#offer button { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
+body.touch #offer { top: max(8px, env(safe-area-inset-top)); bottom: auto; font-size: 12px; max-width: min(32vw, 300px); }
+/* indicaciones del HUD: más discretas en el móvil */
+body.touch #hint { font-size: 12px; padding: 3px 7px; max-width: 34vw; white-space: normal; }
