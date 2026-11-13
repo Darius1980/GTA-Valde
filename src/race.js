@@ -135,12 +135,38 @@ export class Race {
     }
     this.circuit = this.circuits[0]; this.path = this.circuit?.path; this.records = {};
   }
-  get starts() { return this.state === 'idle' && this.cool <= 0 ? this.circuits.map(c => [c.marker.position.x, c.marker.position.z]) : []; }
+  // carreras entre pueblos por la carretera (ruta más corta por la red de la comarca)
+  addInterVillage(region) {
+    const vs = region.villages, main = vs.find(v => v.main), big = vs.filter(v => !v.main && (v.big || Math.hypot(v.c[0] - main.c[0], v.c[1] - main.c[1]) < 3000));
+    const pairs = [...big.map(v => [main, v]), ...big.map(v => [v, main])];
+    // y entre pueblos vecinos: cada uno con el más cercano que no sea el principal
+    for (const v of big) { let o = null, od = Infinity; for (const w of big) { const d = Math.hypot(w.c[0] - v.c[0], w.c[1] - v.c[1]); if (w !== v && d < od) { od = d; o = w; } } if (o && !pairs.some(([a, b]) => a === o && b === v)) pairs.push([v, o]); }
+    for (const [a, b] of pairs) {
+      const pts = region.path(a.node, b.node); if (!pts) continue;
+      let path = new Path(pts); if (path.length < 1200 || path.length > 14000) continue;
+      // la salida, a las afueras del pueblo de origen y separada de las demás
+      let s0 = a.main ? 160 : 60, m;
+      for (let k = 0; k < 12; k++, s0 += 45) { m = path.at(s0 + 24); if (!this.circuits.some(c => Math.hypot(c.marker.position.x - m.x, c.marker.position.z - m.z) < 30)) break; }
+      const P = [[path.at(s0).x, path.at(s0).z]]; for (let i = 0; i < pts.length; i++) if (path.cum[i] > s0) P.push(pts[i]);
+      path = new Path(P); m = path.at(24);
+      const marker = beam(0xe2403a); marker.position.set(m.x, this.world.terrain.height(m.x, m.z), m.z); this.scene.add(marker);
+      const tm = path.at(24, 7.5), trial = beam(0x9b4dff); trial.scale.set(1, 0.6, 1); trial.position.set(tm.x, this.world.terrain.height(tm.x, tm.z), tm.z); this.scene.add(trial);
+      this.circuits.push({ name: `${a.short || a.name} → ${b.short || b.name}`, to: b.name, path, marker, trial, pace: 1.45, prize: +(1 + path.length / 3000).toFixed(2), sp: 70, long: true });
+    }
+  }
+  get starts() { const P = this.lastPos; return this.state === 'idle' && this.cool <= 0 ? this.circuits.filter(c => !P || Math.hypot(c.marker.position.x - P.x, c.marker.position.z - P.z) < 2500).map(c => [c.marker.position.x, c.marker.position.z]) : []; }
   rec(name) { const r = this.records[name]; return r ? `${r.toFixed(1)} s` : 'sin récord'; }
   get active() { return this.state !== 'idle'; }
   get target() { return this.state === 'running' ? [this.cp.position.x, this.cp.position.z] : null; }
+  // ruta que se dibuja en el minimapa (lo que queda de las carreras largas)
+  get route() {
+    if (this.state === 'idle' || !this.circuit?.long) return null;
+    const s = Math.min(this.next, this.ncp) * this.SP, P = this.path, out = [];
+    for (let i = 0; i < P.p.length; i++) if (P.cum[i] >= s - this.SP) out.push(P.p[i]);
+    return out;
+  }
   begin(car, circuit, trial = false) {
-    this.circuit = circuit; this.path = circuit.path; this.trial = trial;
+    this.circuit = circuit; this.path = circuit.path; this.trial = trial; this.SP = circuit.sp || 45;
     this.state = 'countdown'; this.t = 3.5; this.car = car; for (const c of this.circuits) { c.marker.visible = false; c.trial.visible = false; }
     // parrilla: el jugador delante a la derecha, tres rivales
     const lanes = [-0.9, 0.9];
@@ -153,7 +179,7 @@ export class Race {
     this.onStart?.(car);
     this.next = 1; this.ncp = Math.floor(this.path.length / this.SP); this.placeCp();
     if (trial) this.toast(`⏱️ Contrarreloj: ${circuit.name}`, `${(this.path.length / 1000).toFixed(1)} km · récord: ${this.rec(circuit.name)}`);
-    else this.toast(`🏁 ${circuit.name}`, `${(this.path.length / 1000).toFixed(1)} km · sigue los círculos azules y llega el primero`);
+    else this.toast(`🏁 ${circuit.name}`, `${(this.path.length / 1000).toFixed(1)} km · ${circuit.long ? `carrera hasta ${circuit.to}: ` : ''}sigue los círculos azules y llega el primero`);
   }
   placeCp() {
     const s = Math.min(this.path.length - 1, this.next * this.SP), p = this.path.at(s);
@@ -162,7 +188,7 @@ export class Race {
   playerS() { return Math.min(this.next, this.ncp) * this.SP - Math.hypot(this.car.pos.x - this.cp.position.x, this.car.pos.z - this.cp.position.z); }
   update(dt, driving, pos) {
     if (this.cool > 0) this.cool -= dt;
-    this.offer = null;
+    this.offer = null; this.lastPos = pos;
     if (this.state === 'idle') {
       const show = this.cool <= 0 && !this.busy?.(); let near = null; this.nearName = null;
       let nearTrial = null;
@@ -212,6 +238,7 @@ export class Race {
     if (this.rivals.length && this.rivals.every(r => r.ai.done) && this.time > 0) { this.waitLast = (this.waitLast || 0) + dt; if (this.waitLast > 25) return this.end('Has llegado el último', 'Los rivales ya han cruzado la meta', false); }
     const ps = this.playerS(), pos1 = 1 + this.rivals.filter(r => r.ai.s > ps).length;
     if (this.trial) this.write(`⏱️ Punto <b>${Math.min(this.next, this.ncp)}/${this.ncp}</b> · <b>${this.time.toFixed(1)} s</b> · récord ${this.rec(this.circuit.name)}`);
+    else if (this.circuit.long) this.write(`🏁 ${this.circuit.to} · <b>${pos1}º de 4</b> · quedan ${(Math.max(0, this.path.length - ps) / 1000).toFixed(1)} km · ${this.time.toFixed(0)} s`);
     else this.write(`🏁 Punto <b>${Math.min(this.next, this.ncp)}/${this.ncp}</b> · ${pos1}º de 4 · ${this.time.toFixed(0)} s`);
   }
   write(t) { if (this.ui.mission.innerHTML !== t) this.ui.mission.innerHTML = t; }

@@ -14,7 +14,14 @@ export class Outer {
     this.places = data.places || [];
     // ---- relieve por trozos de 32 x 32 celdas
     const t = data.terrain, n = t.n, cell = t.cell, o = t.origin[0], E = t.edge, h = terrain.o.h, C = 32;
-    const mat = terrainMaterial(ortho, ortho, data.ortho.bounds, [9e5, 9e5, 9e5 + 1, 9e5 + 1], tex);
+    // ortofoto media: mosaico de 2 x 2 teselas de 2 km alrededor del jugador en un lienzo de 2048 px
+    this.mid = null;
+    if (data.mid) {
+      const cv = document.createElement('canvas'); cv.width = cv.height = 2048;
+      const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+      this.mid = { cv, g: cv.getContext('2d'), tex: { value: t }, bounds: { value: new THREE.Vector4(9e5, 9e5, 9e5 + 1, 9e5 + 1) }, key: null, imgs: new Map() };
+    }
+    const mat = terrainMaterial(ortho, ortho, data.ortho.bounds, [9e5, 9e5, 9e5 + 1, 9e5 + 1], tex, null, null, this.mid);
     this.terrainMat = mat; this.surfaces.push(mat);
     this.chunks = [];
     const H = (i, j) => h[Math.min(n - 1, Math.max(0, j)) * n + Math.min(n - 1, Math.max(0, i))];
@@ -127,6 +134,31 @@ export class Outer {
       if (old && old !== this.ortho) old.dispose(); this.curDetail = best;
     }, undefined, () => { this.loadingDetail = false; this.curDetail = best; });
   }
+  // mosaico de ortofoto media: se recompone al acercarse a otra esquina de la rejilla de 2 km
+  midUpdate(pos) {
+    const M = this.mid, d = this.data.mid; if (!M) return;
+    const T = d.tile, ci = Math.round((pos.x - d.x0) / T), cj = Math.round((pos.z - d.z0) / T), key = `${ci},${cj}`;
+    if (key === M.key || M.busy) return;
+    M.busy = true;
+    const want = [];
+    for (const [a, b] of [[-1, -1], [0, -1], [-1, 0], [0, 0]]) {
+      const i = ci + a, j = cj + b;
+      want.push([i, j, i >= 0 && j >= 0 && i < d.n && j < d.n ? this.base + d.file.replace('{i}', i).replace('{j}', j) : null]);
+    }
+    const load = (url) => {
+      if (!url) return Promise.resolve(null);
+      if (M.imgs.has(url)) return M.imgs.get(url);
+      const p = new Promise(res => { const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => res(im); im.onerror = () => res(null); im.src = url; });
+      M.imgs.set(url, p); if (M.imgs.size > 12) M.imgs.delete(M.imgs.keys().next().value);
+      return p;
+    };
+    Promise.all(want.map(w => load(w[2]))).then(ims => {
+      M.busy = false; const g = M.g; g.clearRect(0, 0, 2048, 2048);
+      ims.forEach((im, k) => { if (im) g.drawImage(im, (k % 2) * 1024, (k >> 1) * 1024, 1024, 1024); });
+      const x0 = d.x0 + (ci - 1) * T, z0 = d.z0 + (cj - 1) * T;
+      M.bounds.value.set(x0, z0 + 2 * T, x0 + 2 * T, z0); M.tex.value.needsUpdate = true; M.key = key; // fila de arriba = norte (z menor), como las demás
+    });
+  }
   setWeather(U) { this.U = U; for (const m of this.surfaces) weatherize(m, U); }
   // un material por textura para todas las teselas (menos programas y cambios de estado)
   share(obj) {
@@ -168,7 +200,7 @@ export class Outer {
       c.obj.visible = dx * dx + dz * dz < R * R;
     }
     if ((this._t = (this._t || 0) + 1) % 10) { if (this.queue.length) this.build(this.queue.shift()); return; }
-    this.scan(pos, R); this.detail(pos);
+    this.scan(pos, R); this.detail(pos); this.midUpdate(pos);
     if (this.queue.length) this.build(this.queue.shift());
   }
   scan(pos, R) {

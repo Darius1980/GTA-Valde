@@ -44,7 +44,11 @@ export class Jobs {
   get flags() { return this.state === 'idle' ? this.defs.filter(d => d.marker.visible).map(d => [...d.marker.userData.at, d.id]) : []; }
   newFare(from) {
     const d = this.defs.find(x => x.id === 'taxi');
-    const cand = this.drops.filter(p => { const k = Math.hypot(p[0] - from.x, p[1] - from.z); return k > 40 && k < 220; });
+    // fuera del pueblo principal, el pasajero espera en una calle del pueblo en el que estás
+    const away = this.region && Math.hypot(from.x - this.center[0], from.z - this.center[1]) > 1500;
+    const pool = away ? this.region.spotsNear(from.x, from.z, 40, 260) : this.drops;
+    if (away && !pool.length) { this.taxiT = 6; return; }
+    const cand = pool.filter(p => { const k = Math.hypot(p[0] - from.x, p[1] - from.z); return k > 40 && k < 260; });
     const p = cand.length ? cand[Math.floor(Math.random() * cand.length)] : this.drops[0];
     d.at = p; this.place(d.marker, p);
     this.fare.position.set(p[0] + 1.6, this.world.terrain.height(p[0], p[1]), p[1]); this.fare.rotation.y = Math.random() * 6;
@@ -58,13 +62,28 @@ export class Jobs {
       this.left = 4; this.toast('✉️ El correo', 'Reparte 4 cartas por las casas, a pie o en coche');
       this.nextLetter(pos);
     } else {
-      this.left = 1; this.fare.visible = false;
-      // destino: la granja, la gasolinera, la otra punta del pueblo o una casa lejana
-      const far = this.drops.filter(p => Math.hypot(p[0] - pos.x, p[1] - pos.z) > 150);
-      const opts = [...far.slice(0, 40), ...(this.extraDest || [])];
-      const dest = opts[Math.floor(Math.random() * opts.length)] || this.drops[0];
-      this.toast('🚕 ¡Sube!', 'Llévame a la marca verde, que tengo prisa');
-      this.setDrop(dest, pos, 4.2); this.fareDist = Math.hypot(dest[0] - pos.x, dest[1] - pos.z);
+      this.left = 1; this.fare.visible = false; this.destName = null; this.route = null;
+      // destino: otro pueblo de la comarca (casi siempre) o, a veces, la otra punta del pueblo
+      const R = this.region, here = R?.villageAt(pos.x, pos.z, 1500);
+      const away = here && !here.main, trips = [];
+      if (R && (away || Math.random() < 0.7)) for (const [v, pts, L] of R.toVillages([pos.x, pos.z])) {
+        if (v !== here && Math.hypot(v.c[0] - pos.x, v.c[1] - pos.z) > 900 && L > 1000 && L < 12000) trips.push([v, pts, L]);
+      }
+      if (trips.length) {
+        // más a menudo a los pueblos grandes y al principal
+        const w = trips.map(([v]) => v.main ? 4 : v.big ? 2 : 1), tot = w.reduce((a, b) => a + b, 0); let r = Math.random() * tot, k = 0;
+        while (r > w[k]) r -= w[k++];
+        const [v, pts, L] = trips[Math.min(k, trips.length - 1)], dest = R.nodePos(v.node);
+        this.destName = v.name; this.route = pts.slice();
+        this.toast('🚕 ¡Sube!', `Lléveme a ${v.name}, por favor, que tengo prisa · ${(L / 1000).toFixed(1)} km`);
+        this.place(this.dropM, dest); this.dropM.visible = true; this.time = Math.round(45 + L / 11); this.fareDist = L;
+      } else {
+        const far = this.drops.filter(p => Math.hypot(p[0] - pos.x, p[1] - pos.z) > 150);
+        const opts = away ? R.spotsNear(pos.x, pos.z, 150, 450) : [...far.slice(0, 40), ...(this.extraDest || [])];
+        const dest = opts[Math.floor(Math.random() * opts.length)] || this.drops[0];
+        this.toast('🚕 ¡Sube!', 'Llévame a la marca verde, que tengo prisa');
+        this.setDrop(dest, pos, 4.2); this.fareDist = Math.hypot(dest[0] - pos.x, dest[1] - pos.z);
+      }
     }
     d.marker.visible = false;
   }
@@ -101,15 +120,21 @@ export class Jobs {
       let pay;
       if (d.id === 'leche') pay = Math.max(15, 70 + Math.round(Math.max(0, this.time)) - this.hits * 10);
       else if (d.id === 'correo') pay = 12 + Math.max(0, Math.round(this.time / 2));
-      else pay = Math.round(15 + this.fareDist * 0.06 + Math.max(0, this.time) * 0.6 - this.hits * 5);
+      else pay = Math.round(15 + Math.min(this.fareDist, 1500) * 0.06 + Math.max(0, this.fareDist - 1500) * 0.03 + Math.max(0, this.time) * 0.6 - this.hits * 5);
       pay = Math.max(5, pay); this.wallet.money += pay; this.earned += pay; this.left--; this.sound?.('ok');
       if (this.left > 0) { this.toast(`+${pay} €`, `Quedan ${this.left} cartas`); this.nextLetter(pos); }
       else {
         if (d.id === 'taxi') { const [x, z] = this.dropM.userData.at; this.fare.position.set(x + 1.5, this.world.terrain.height(x, z), z); this.fare.visible = true; this.fareWalk = 5; }
-        this.toast(d.id === 'taxi' ? '🚕 Carrera completada' : '¡Trabajo hecho!', `Has ganado ${this.earned} €`); this.finish();
+        this.toast(d.id === 'taxi' ? (this.destName ? `🚕 ¡Ya estamos en ${this.destName}!` : '🚕 Carrera completada') : '¡Trabajo hecho!', `Has ganado ${this.earned} €`); this.finish();
       }
     } else if (this.time <= 0) this.fail(d.id === 'leche' ? 'La leche se ha calentado' : d.id === 'taxi' ? 'El pasajero ha llegado tarde y no te paga' : 'Se acabó el tiempo del reparto');
-    const label = d.id === 'correo' ? `✉️ Carta ${5 - this.left}/4` : `${d.icon} ${d.id === 'taxi' ? 'Lleva al pasajero' : 'A la cooperativa'}`;
+    if (this.route) { // la ruta del minimapa se va recortando según avanzas
+      const rt = this.route; let cut = 0;
+      for (let i = 0; i < Math.min(rt.length, 30); i++) if (Math.hypot(rt[i][0] - pos.x, rt[i][1] - pos.z) < 30) cut = i;
+      if (cut) rt.splice(0, cut);
+    }
+    const left = this.destName ? ` a ${this.destName} · ${(Math.hypot(this.dropM.userData.at[0] - pos.x, this.dropM.userData.at[1] - pos.z) / 1000).toFixed(1)} km` : '';
+    const label = d.id === 'correo' ? `✉️ Carta ${5 - this.left}/4` : `${d.icon} ${d.id === 'taxi' ? 'Lleva al pasajero' + left : 'A la cooperativa'}`;
     const txt = `${label} · <b class="${this.time < 10 ? 'late' : ''}">${Math.max(0, Math.ceil(this.time))} s</b>`;
     if (this.ui.mission.innerHTML !== txt) this.ui.mission.innerHTML = txt;
   }
@@ -123,7 +148,7 @@ export class Jobs {
   }
   fail(msg) { this.toast('Trabajo fallido', msg); this.sound?.('fail'); this.finish(); }
   finish() {
-    const d = this.job; this.state = 'idle'; this.dropM.visible = false; this.cool = 5; this._h0 = undefined; this.ui.mission.innerHTML = '';
+    const d = this.job; this.state = 'idle'; this.dropM.visible = false; this.route = null; this.destName = null; this.cool = 5; this._h0 = undefined; this.ui.mission.innerHTML = '';
     if (d.id === 'taxi') { d.at = null; this.taxiT = 8; }
     this.job = null;
   }

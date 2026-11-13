@@ -21,6 +21,7 @@ import { Jobs } from './jobs.js';
 import { Plaza } from './fiesta.js';
 import { Interiors } from './interiors.js';
 import { Outer } from './outer.js';
+import { Region, RegionTraffic } from './region.js';
 import { Molinos } from './molinos.js';
 
 const isMobile = matchMedia('(pointer: coarse)').matches;
@@ -155,7 +156,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   const net = new RoadNet(data.roads, new Set(['residential', 'tertiary', 'unclassified', 'living_street', 'trunk']));
   const villageNet = new RoadNet(data.roads, new Set(['residential', 'tertiary', 'living_street']));
   const isTrunk = r => r.k === 'trunk', isVillage = r => r.k !== 'trunk';
-  const aiSpawn = (c) => { const trunk = c.aiKind === 'trunk'; c.ai = new Driver(net, c, net.randomSpot(trunk ? isTrunk : isVillage), trunk ? 19 : 6.5); };
+  const aiSpawn = (c) => { if (c.aiRespawn) return c.aiRespawn(); const trunk = c.aiKind === 'trunk'; c.ai = new Driver(net, c, net.randomSpot(trunk ? isTrunk : isVillage), trunk ? 19 : 6.5); };
   const aiColors = [0xd8d8d0, 0x2c4a6e, 0x6e1f1f, 0x3a3f3a, 0xb59a5a, 0x1d1d1d];
   for (let i = 0; i < (isMobile ? 4 : 6); i++) {
     const c = new Car(world, aiColors[i % aiColors.length], i % 3 === 2 ? 'suv' : 'sedan', data.carScale || 1);
@@ -166,6 +167,12 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     c.ai = new Driver(net, c, net.randomSpot(isTrunk), 7.5); scene.add(c.mesh); cars.push(c);
     const sp = c.ai; c.aiRespawn = () => { c.ai = new Driver(net, c, net.randomSpot(isTrunk), 7.5); }; void sp;
   }
+  // red de carreteras de toda la comarca y tráfico en los otros pueblos y carreteras
+  const region = outer ? new Region({ roads: data.roads, outerRoads: outer.data.roads, places: outer.places, center: data.plaza?.start || data.spawn, title: data.title }) : null;
+  const regionTraffic = region ? new RegionTraffic({
+    region, outerRoads: outer.data.roads, inner: 1500, count: isMobile ? 4 : 7,
+    makeCar: (i) => { const c = new Car(world, aiColors[(i + 2) % aiColors.length], i % 4 === 3 ? 'suv' : 'sedan', data.carScale || 1); scene.add(c.mesh); cars.push(c); return c; },
+  }) : null;
   // vecinos paseando
   const walkers = [];
   for (let i = 0; i < (isMobile ? 6 : 10); i++) { const w = new Walker(villageNet, world, villageNet.randomSpot(), i); scene.add(w.mesh); walkers.push(w); }
@@ -193,6 +200,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   });
   race.onRemove = (c) => { scene.remove(c.mesh); for (const sp of c.smoke) scene.remove(sp); const i = cars.indexOf(c); if (i >= 0 && c !== driving) cars.splice(i, 1); };
   race.onPrize = (p) => { missions.money += p; };
+  if (region) race.addInterVillage(region);
   const toast = (a, b) => missions.toast(a, b), sound = k => engine.blip(k);
   // vehículos: los que compras se guardan con la partida
   const spawnVehicle = (kind, color, x, z, h) => { const c = new Car(world, color, kind, data.carScale || 1); c.place(x, z, h); scene.add(c.mesh); cars.push(c); return c; };
@@ -207,7 +215,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   if (saved?.weather) weather.set(saved.weather);
   const shops = new Shops({ scene, world, data, center, colliders, spawnVehicle, wallet: missions, toast, sound, sites, owned: (saved?.owned || []).map(v => v.kind) });
   const jobs = new Jobs({ scene, world, data, center, drops: deliveryPoints(data), ui, toast, sound, wallet: missions, personScale: world.personScale });
-  jobs.extraDest = [shops.gasAt, jobs.farm].filter(Boolean);
+  jobs.extraDest = [shops.gasAt, jobs.farm].filter(Boolean); jobs.region = region;
   const police = new Police({ scene, world, net, cars, scale: data.carScale || 1, isMobile, ui: { wanted: document.getElementById('wanted') }, toast, sound, wallet: missions });
   world.onHit = (w, c) => { if (c === driving) police.report('atropello'); };
   const ambient = new Ambient(engine);
@@ -309,6 +317,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
       c.repair(); c.fuel = 1; c.speed = 0;
       if (c.home) c.place(...c.home); else if (c.aiRespawn) c.aiRespawn(); else if (c.aiKind) aiSpawn(c);
     }
+    regionTraffic?.update(focus, driving);
     for (const w of walkers) w.update(dt, cars, player, focus);
 
     // cámara en tercera persona con seguimiento suave
@@ -412,7 +421,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     curOffer = offer && !offerUI.declined ? offer : null;
     const oTxt = curOffer ? curOffer.text : '';
     if (offerUI.txt !== oTxt) { offerUI.txt = oTxt; offerEl.classList.toggle('on', !!curOffer); offerEl.querySelector('span').textContent = oTxt; }
-    if ((frameNo++ & 1) === 0) minimap.draw(target.x, target.z, flying ? flying.heading : driving ? driving.heading : player.heading, camState.yaw, cars, driving, { walkers, flags: [...race.starts, ...jobs.flags, ...shops.flags, ...interiors.flags, ...(plane ? [[plane.f.park.x, plane.f.park.z, 'air']] : [])], target: race.target || jobs.target || missions.target, targetColor: race.target ? '#3aa0e2' : jobs.active || missions.state === 'deliver' ? '#47d16c' : '#f5c542' });
+    if ((frameNo++ & 1) === 0) minimap.draw(target.x, target.z, flying ? flying.heading : driving ? driving.heading : player.heading, camState.yaw, cars, driving, { walkers, flags: [...race.starts, ...jobs.flags, ...shops.flags, ...interiors.flags, ...(plane ? [[plane.f.park.x, plane.f.park.z, 'air']] : [])], target: race.target || jobs.target || missions.target, route: race.route || jobs.route, targetColor: race.target ? '#3aa0e2' : jobs.active || missions.state === 'deliver' ? '#47d16c' : '#f5c542' });
     camera.fov += ((driving ? 60 + Math.min(15, Math.abs(driving.speed) * 0.5) : 60) - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix();
     if (driving && gearBtn.dataset.g !== String(driving.gear)) { gearBtn.dataset.g = driving.gear; gearBtn.textContent = driving.gear === 1 ? 'C' : 'L'; }
     const modeTxt = flying ? `✈ ${Math.round(flying.altitude)} m · gas ${Math.round(flying.throttle * 100)} %` : driving ? `${driving.gear === 1 ? 'Corta' : 'Larga'} · ${driving.wrecked ? 'averiado' : `daños ${Math.round(100 - driving.health)} %`} <span id="fuel"><i style="width:${Math.round(driving.fuel * 100)}%"></i></span>` : interiors.inside ? interiors.inside.name : 'A pie';
@@ -434,7 +443,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     renderer.render(scene, camera);
     requestAnimationFrame(frame);
   }
-  window.__game = { plane, get flying() { return flying; }, data, outer, weather, police, shops, jobs, plaza, interiors, save, animals, player, cars, walkers, race, camera, scene, renderer, terrain, dayNight, missions, get driving() { return driving; } };
+  window.__game = { region, regionTraffic, plane, get flying() { return flying; }, data, outer, weather, police, shops, jobs, plaza, interiors, save, animals, player, cars, walkers, race, camera, scene, renderer, terrain, dayNight, missions, get driving() { return driving; } };
   frame();
 }).catch(e => { console.error(e); document.getElementById('lmsg').textContent = 'Error cargando: ' + e.message; });
 

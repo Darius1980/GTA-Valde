@@ -888,20 +888,26 @@ export function buildTerrain(meta, terrain, orthoFull, orthoCenter, tex, mask = 
   }
   return mesh;
 }
-export function terrainMaterial(orthoFull, orthoCenter, fb, cb, tex, mask = null, paint = null) {
+export function terrainMaterial(orthoFull, orthoCenter, fb, cb, tex, mask = null, paint = null, mid = null) {
   const mat = new THREE.MeshStandardMaterial({ map: orthoFull, roughness: 1 });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.tCenter = mat.userData.tC || (mat.userData.tC = { value: orthoCenter }); sh.uniforms.tDetail = { value: tex.detail };
     sh.uniforms.tMask = { value: mask?.tex || null }; sh.uniforms.maskB = { value: mask?.bounds || new THREE.Vector4(0, 0, 1, 1) }; sh.uniforms.tAsph = { value: tex.asphalt }; sh.uniforms.tConc = { value: tex.concrete }; sh.uniforms.tDirt = { value: tex.dirt }; sh.uniforms.tGrass = { value: tex.grass }; sh.uniforms.tGravel = { value: tex.gravel }; sh.uniforms.tPaint = { value: paint?.tex || null }; sh.uniforms.paintB = { value: paint?.bounds || new THREE.Vector4(0, 0, 1, 1) };
+    if (mid) { sh.uniforms.tMid = mid.tex; sh.uniforms.midB = mid.bounds; }
     sh.uniforms.fullB = { value: new THREE.Vector4(...fb) }; sh.uniforms.centerB = mat.userData.cB || (mat.userData.cB = { value: new THREE.Vector4(...cb) });
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = (modelMatrix * vec4(transformed,1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
       varying vec3 vWPos; uniform sampler2D tCenter; uniform sampler2D tDetail; uniform vec4 fullB; uniform vec4 centerB;
-      uniform sampler2D tMask; uniform sampler2D tAsph; uniform sampler2D tConc; uniform sampler2D tDirt; uniform vec4 maskB; uniform sampler2D tGrass; uniform sampler2D tGravel; uniform sampler2D tPaint; uniform vec4 paintB;`)
+      uniform sampler2D tMask; uniform sampler2D tAsph; uniform sampler2D tConc; uniform sampler2D tDirt; uniform vec4 maskB; uniform sampler2D tGrass; uniform sampler2D tGravel; uniform sampler2D tPaint; uniform vec4 paintB;${mid ? ' uniform sampler2D tMid; uniform vec4 midB;' : ''}`)
       .replace('#include <map_fragment>', `
       vec2 uvF = vec2((vWPos.x - fullB.x) / (fullB.z - fullB.x), (vWPos.z - fullB.y) / (fullB.w - fullB.y));
       vec4 col = texture2D(map, uvF);
+      ${mid ? `vec2 uvMd = vec2((vWPos.x - midB.x) / (midB.z - midB.x), (vWPos.z - midB.y) / (midB.w - midB.y));
+      if (uvMd.x > 0.0 && uvMd.x < 1.0 && uvMd.y > 0.0 && uvMd.y < 1.0) { // ortofoto media (2 m/px) alrededor del jugador
+        vec4 mc = texture2D(tMid, uvMd); vec2 em = min(uvMd, 1.0 - uvMd);
+        col.rgb = mix(col.rgb, mc.rgb, mc.a * smoothstep(0.0, 0.03, min(em.x, em.y)));
+      }` : ''}
       vec2 uvC = vec2((vWPos.x - centerB.x) / (centerB.z - centerB.x), (vWPos.z - centerB.y) / (centerB.w - centerB.y));
       if (uvC.x > 0.0 && uvC.x < 1.0 && uvC.y > 0.0 && uvC.y < 1.0) {
         vec2 e = min(uvC, 1.0 - uvC); float k = smoothstep(0.0, 0.05, min(e.x, e.y));
@@ -928,7 +934,7 @@ export function terrainMaterial(orthoFull, orthoCenter, fb, cb, tex, mask = null
       }` : ''}
       diffuseColor *= col;`);
   };
-  mat.customProgramCacheKey = () => 'terrain' + (mask ? 'm' : '') + (paint ? 'p' : '');
+  mat.customProgramCacheKey = () => 'terrain' + (mask ? 'm' : '') + (paint ? 'p' : '') + (mid ? 'd' : '');
   return mat;
 }
 

@@ -244,18 +244,32 @@ for j, i in cand:
     if len(trees) >= MAXT: break
 print("encinas:", len(trees))
 
-# ortofotos de detalle de cada pueblo (1,6 km)
+# ortofotos de detalle de cada pueblo: casco a 0,5 m/px (1 km) si está; si no, 1,6 km a 0,8 m/px
 detail = []
 for f in sorted(glob.glob(os.path.join(DO, "ortho_v_*.jpg"))):
     nid = int(re.search(r"ortho_v_(\d+)", f).group(1)); nd = nodes.get(nid)
     if not nd: continue
+    fw, R = os.path.join(DO, f"ortho_w_{nid}.jpg"), 800
+    if os.path.exists(fw): f, R = fw, 500
     try: im = Image.open(f).convert("RGB")
     except Exception as e: print("detalle", f, e); continue
-    name = os.path.basename(f); im.save(os.path.join(OUT, name), quality=82)
+    name = os.path.basename(f); im.save(os.path.join(OUT, name), quality=80)
     x, z = loc(*to_utm.transform(nd["lon"], nd["lat"]))
-    detail.append({"file": name, "bounds": [x - 800, z + 800, x + 800, z - 800], "c": [x, z]})
+    detail.append({"file": name, "bounds": [x - R, z + R, x + R, z - R], "c": [x, z]})
 print("ortofotos de detalle:", len(detail))
-out = {"half": HALF, "detail": detail, "terrain": terrain, "ortho": ortho, "roads": roads, "water": water, "groups": bgroups, "trees": trees, "places": places}
+# ortofoto media (~2 m/px): teselas de 2 km; en el juego, i hacia el este y j hacia el sur desde (-HALF, -HALF)
+mid = None
+MT = 2000; NM = int(2 * HALF // MT); have_m = 0
+for i in range(NM):
+    for j in range(NM):
+        f = os.path.join(DO, f"ortho_m_{i}_{j}.jpg")
+        if not os.path.exists(f): continue
+        try: im = Image.open(f).convert("RGB")
+        except Exception as e: print("media", f, e); continue
+        im.save(os.path.join(OUT, f"ortho_m_{i}_{NM - 1 - j}.jpg"), quality=78); have_m += 1
+if have_m: mid = {"tile": MT, "n": NM, "x0": -HALF, "z0": -HALF, "file": "ortho_m_{i}_{j}.jpg"}
+print("ortofoto media:", have_m, "teselas")
+out = {"half": HALF, "detail": detail, "mid": mid, "terrain": terrain, "ortho": ortho, "roads": roads, "water": water, "groups": bgroups, "trees": trees, "places": places}
 json.dump(out, open(os.path.join(OUT, "outer.json"), "w"), separators=(",", ":"))
 for f in ("outer.json", "terrain_outer.json", "ortho_outer.jpg"):
     print(f, os.path.getsize(os.path.join(OUT, f)) // 1024, "KB")

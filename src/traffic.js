@@ -4,7 +4,8 @@ import { makeCharacter, animateCharacter } from './models.js';
 
 // Red de calles: polilíneas de OSM unidas en los vértices que comparten.
 export class RoadNet {
-  constructor(roads, kinds) {
+  constructor(roads, kinds, area = null) {
+    this.area = area; // [x, z, radio]: zona de tráfico fuera del pueblo principal
     this.roads = roads.filter(r => kinds.has(r.k) && r.p.length > 1);
     this.at = new Map();
     this.roads.forEach((r, ri) => r.p.forEach((p, i) => {
@@ -12,6 +13,10 @@ export class RoadNet {
     }));
   }
   static limit = 900; // borde del mapa jugable
+  inArea(x, z, m = 60) {
+    const a = this.area;
+    return a ? Math.hypot(x - a[0], z - a[1]) < a[2] + m : Math.abs(x) < RoadNet.limit + m && Math.abs(z) < RoadNet.limit + m;
+  }
   key(p) { return `${Math.round(p[0] * 2)},${Math.round(p[1] * 2)}`; }
   // al llegar al vértice i de la calle ri (yendo en sentido dir), elige por dónde seguir
   next(ri, i, dir, rnd = Math.random) {
@@ -35,7 +40,7 @@ export class RoadNet {
     for (let k = 0; k < 50; k++) { // dentro del mapa
       const [r, ri] = list[Math.floor(Math.random() * list.length)];
       const i = Math.floor(Math.random() * (r.p.length - 1)), p = r.p[i];
-      if (Math.abs(p[0]) < RoadNet.limit && Math.abs(p[1]) < RoadNet.limit) return { ri, i, dir: Math.random() < 0.5 && i > 0 ? -1 : 1 };
+      if (this.inArea(p[0], p[1], 0)) return { ri, i, dir: Math.random() < 0.5 && i > 0 ? -1 : 1 };
     }
     return { ri: 0, i: 0, dir: 1 };
   }
@@ -87,7 +92,7 @@ export class Driver {
   }
   update(dt, obstacles) {
     const c = this.car, pos = tmp2.set(c.pos.x, c.pos.z);
-    if (Math.abs(c.pos.x) > 960 || Math.abs(c.pos.z) > 960) this.f.deadEnd = true; // se sale del mapa
+    if (!this.f.net.inArea(c.pos.x, c.pos.z)) this.f.deadEnd = true; // se sale del mapa
     this.f.advance(pos);
     const dx = this.f.carrot.x - c.pos.x, dz = this.f.carrot.y - c.pos.z;
     let err = Math.atan2(dx, dz) - c.heading; err = Math.atan2(Math.sin(err), Math.cos(err));

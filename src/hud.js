@@ -7,6 +7,8 @@ export class Minimap {
     el.width = el.height = this.size * dpr; this.g.scale(dpr, dpr);
   }
   draw(px, pz, heading, camYaw, cars, driving, extra = {}) {
+    // con una ruta larga (taxi a otro pueblo o carrera) el mapa se aleja al ir en coche
+    const want = extra.route && driving ? 420 : 140; this.radius += (want - this.radius) * 0.08;
     const g = this.g, S = this.size, r = S / 2, k = r / this.radius;
     const [x0, , x1] = this.b, iw = this.img.width, mpp = (x1 - x0) / iw;
     g.save(); g.clearRect(0, 0, S, S);
@@ -39,6 +41,12 @@ export class Minimap {
       if (d > lim) { x *= lim / d; y *= lim / d; }
       g.fillStyle = FLAG[f[2]] || '#e2403a'; g.strokeStyle = '#000'; g.lineWidth = 1;
       g.beginPath(); g.arc(x, y, 4, 0, 7); g.fill(); g.stroke();
+    }
+    // ruta por carretera hasta el destino (como un GPS)
+    if (extra.route && extra.route.length > 1) {
+      g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 6; g.lineJoin = 'round';
+      const path = () => { g.beginPath(); g.moveTo(0, 0); extra.route.forEach(([x, z]) => g.lineTo((x - px) * k, (z - pz) * k)); };
+      path(); g.stroke(); g.strokeStyle = '#d64fd8'; g.lineWidth = 3.5; path(); g.stroke();
     }
     // objetivo de la misión (en el borde si está lejos)
     if (extra.target) {
