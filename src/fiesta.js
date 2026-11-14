@@ -116,7 +116,7 @@ export class Plaza {
     const trail = new THREE.Mesh(new THREE.SphereGeometry(0.15, 6, 4), new THREE.MeshBasicMaterial({ color: 0xffe0a0 }));
     const p = new THREE.Vector3(cx + (Math.random() - 0.5) * 30, y + 2, cz - 40 + (Math.random() - 0.5) * 30);
     this.scene.add(trail); this.fw.push({ p, v: new THREE.Vector3((Math.random() - 0.5) * 4, 30 + Math.random() * 8, (Math.random() - 0.5) * 4), trail, t: 0 });
-    this.ambient?.ready && this.ambient.whistle(0.15);
+    this.ambient?.ready && this.ambient.whistle(0.15, p.x, p.z);
   }
   explode(f) {
     this.scene.remove(f.trail); f.burst = true; f.t = 0;
@@ -130,6 +130,6 @@ export class Plaza {
     const col = [0xff4040, 0xffd040, 0x40ff80, 0x60a0ff, 0xff60ff, 0xffffff][Math.random() * 6 | 0];
     f.pts = new THREE.Points(g, new THREE.PointsMaterial({ color: col, size: 0.7, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
     f.pts.frustumCulled = false; this.scene.add(f.pts);
-    this.ambient?.ready && this.ambient.pop(0.3);
+    this.ambient?.ready && this.ambient.pop(0.3, f.p.x, f.p.z);
   }
 }

@@ -433,7 +433,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
       if (toll.k >= toll.n) toll = null;
     }
     camera.getWorldDirection(_lisDir); { const l = Math.hypot(_lisDir.x, _lisDir.z) || 1; _lis.x = camera.position.x; _lis.z = camera.position.z; _lis.fx = _lisDir.x / l; _lis.fz = _lisDir.z / l; }
-    ambient.update(dt, { lis: _lis, animals, day: 1 - dayNight.n, night: dayNight.n, rain: interiors.inside ? 0 : weather.cur.rain, wind: interiors.inside ? 0 : Math.max(weather.cur.snow, weather.cur.fog * 0.5), siren: police.siren, music: plaza.musicLevel, inside: !!interiors.inside , hour: dayNight.hour, open: !!outer && Math.hypot(target.x - (data.plaza?.start || data.spawn)[0], target.z - (data.plaza?.start || data.spawn)[1]) > 500 && !(region?.villageAt(target.x, target.z, 450))});
+    ambient.update(dt, { lis: _lis, animals, cabin: driving || flying ? 1 : 0, day: 1 - dayNight.n, night: dayNight.n, rain: interiors.inside ? 0 : weather.cur.rain, wind: interiors.inside ? 0 : Math.max(weather.cur.snow, weather.cur.fog * 0.5), siren: police.siren, music: plaza.musicLevel, inside: !!interiors.inside , hour: dayNight.hour, open: !!outer && Math.hypot(target.x - (data.plaza?.start || data.spawn)[0], target.z - (data.plaza?.start || data.spawn)[1]) > 500 && !(region?.villageAt(target.x, target.z, 450))});
     if ((saveT -= dt) <= 0) { saveT = 10; save(); }
     // campanas: repican al pasar junto a la iglesia (como mucho una vez cada minuto y medio)
     if (bellTower) {
