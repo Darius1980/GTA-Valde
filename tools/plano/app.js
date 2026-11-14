@@ -20,8 +20,8 @@ const PAINT = { tierra: [176, 140, 98], hierba: [96, 150, 60], grava: [205, 200,
 const TALUD = { suave: 12, medio: 6, fuerte: 3, muro: 1 }, TALUD_TXT = { suave: 'talud suave', medio: 'talud medio', fuerte: 'talud fuerte', muro: 'corte vertical' };
 const dhTxt = v => v > 0 ? 'Subir ' + v + ' m' : v < 0 ? 'Bajar ' + (-v) + ' m' : 'Aplanar';
 const layer = document.createElement('canvas'), lg = layer.getContext('2d');
-const TOOL = { wall: 'Tapia', ruin: 'Ruina', rock: 'Rocas naturales', bld: 'Edificio nuevo', shape: 'Ajustar casa', gone: 'Quitar casa', tree: 'Poner árboles', untree: 'Quitar árboles', paint: 'Pincel de suelo', nivel: 'Desnivel', del: 'Editar lo mío', unwall: 'Quitar tapia del juego', photo: 'Mover foto', molino: 'Molino eólico' };
-const HINT = { wall: 'Toca punto a punto y pulsa Guardar', ruin: 'Toca punto a punto y pulsa Guardar', rock: 'Dibuja el contorno de las rocas', bld: 'Toca las esquinas del edificio', shape: 'Toca una casa y arrastra sus esquinas', gone: 'Toca la casa que sobra', tree: 'Dibuja el contorno de la zona', untree: 'Dibuja el contorno de la zona', paint: 'Arrastra para pintar; dos dedos o botón derecho para moverte', nivel: 'Dibuja el contorno de la zona que sube o baja', del: 'Toca algo tuyo para cambiarlo o borrarlo', unwall: 'Toca una tapia blanca discontinua', photo: 'Arrastra la foto o usa las flechas', molino: 'Toca el sitio del molino; aleja el plano para ver los montes' };
+const TOOL = { wall: 'Tapia', ruin: 'Ruina', rock: 'Rocas naturales', bld: 'Edificio nuevo', shape: 'Ajustar casa', gone: 'Quitar casa', tree: 'Poner árboles', untree: 'Quitar árboles', paint: 'Pincel de suelo', nivel: 'Desnivel', del: 'Editar lo mío', unwall: 'Quitar tapia del juego', photo: 'Mover foto', molino: 'Molino eólico', negocio: 'Negocio' };
+const HINT = { wall: 'Toca punto a punto y pulsa Guardar', ruin: 'Toca punto a punto y pulsa Guardar', rock: 'Dibuja el contorno de las rocas', bld: 'Toca las esquinas del edificio', shape: 'Toca una casa y arrastra sus esquinas', gone: 'Toca la casa que sobra', tree: 'Dibuja el contorno de la zona', untree: 'Dibuja el contorno de la zona', paint: 'Arrastra para pintar; dos dedos o botón derecho para moverte', nivel: 'Dibuja el contorno de la zona que sube o baja', del: 'Toca algo tuyo para cambiarlo o borrarlo', unwall: 'Toca una tapia blanca discontinua', photo: 'Arrastra la foto o usa las flechas', molino: 'Toca el sitio del molino; aleja el plano para ver los montes', negocio: 'Escribe el nombre y toca la puerta del negocio' };
 function resize() { const r = map.getBoundingClientRect(), d = devicePixelRatio || 1; cv.width = r.width * d; cv.height = r.height * d; g.setTransform(d, 0, 0, d, 0, 0); draw(); }
 const W = () => cv.width / (devicePixelRatio || 1), H = () => cv.height / (devicePixelRatio || 1);
 const toS = (x, z) => [(x - view.cx) * view.s + W() / 2, (z - view.cz) * view.s + H() / 2];
@@ -86,6 +86,11 @@ function draw() {
     const L = Math.max(11, Math.min(rr, 40)); g.lineWidth = 3; g.strokeStyle = '#fff'; g.beginPath(); for (let k = 0; k < 3; k++) { const t = -Math.PI / 2 + k * 2.0944; g.moveTo(a, b); g.lineTo(a + L * Math.cos(t), b + L * Math.sin(t)); } g.stroke();
     g.beginPath(); g.arc(a, b, hi ? 8 : 6, 0, 7); g.fillStyle = hi ? '#4fc3f7' : C('--mill'); g.fill(); g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke();
   }
+  for (const it of items) if (it.kind === 'negocio') { // chincheta con el nombre
+    const hi = sel && sel.item === it, [a, b] = toS(it.p[0][0], it.p[0][1]);
+    g.beginPath(); g.moveTo(a, b); g.lineTo(a - 7, b - 13); g.arc(a, b - 17, 8, 2.62, 0.52); g.closePath(); g.fillStyle = hi ? '#4fc3f7' : C('--shop'); g.fill(); g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke();
+    if (view.s > 0.25 || hi) { const t = it.raw.name || 'Negocio'; g.font = '700 12px system-ui'; const w = g.measureText(t).width; g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(a + 10, b - 28, w + 8, 17); g.fillStyle = '#fff'; g.fillText(t, a + 14, b - 15); }
+  }
   if (editPts()) for (const q of sel.item.p) { const [a, b] = toS(q[0], q[1]); g.beginPath(); g.arc(a, b, 6, 0, 7); g.fillStyle = '#4fc3f7'; g.fill(); g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke(); }
   if (cur.length) {
     const cc = mode === 'wall' && $('wmat').value === 'bloque' ? C('--block') : mode === 'wall' && $('wmat').value === 'irregular' ? C('--wallirr') : mode === 'ruin' ? C('--ruin') : mode === 'bld' ? C('--bld') : mode === 'tree' ? C('--tree') : mode === 'untree' ? C('--gone') : mode === 'rock' ? C('--rock') : mode === 'nivel' ? C('--level') : C('--wall');
@@ -98,7 +103,8 @@ function draw() {
   const m = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000].find(v => v * view.s >= 50) || 5000, x0 = 16, y0 = H() - 18;
   g.fillStyle = '#fff'; g.fillRect(x0, y0, m * view.s, 4); g.font = '600 12px system-ui'; g.fillText(m >= 1000 ? m / 1000 + ' km' : m + ' m', x0, y0 - 6);
   
-  const nL = items.filter(i => i.kind === 'wall' || i.kind === 'ruin').length, nB = items.filter(i => i.kind === 'building').length, nR = items.filter(i => i.kind === 'rocks').length, nS = items.filter(i => i.kind === 'suelo').length, nV = items.filter(i => i.kind === 'nivel').length, nM = items.filter(i => i.kind === 'molino').length, nZ = items.length - nL - nB - nR - nS - nV - nM, parts = [];
+  const nL = items.filter(i => i.kind === 'wall' || i.kind === 'ruin').length, nB = items.filter(i => i.kind === 'building').length, nR = items.filter(i => i.kind === 'rocks').length, nS = items.filter(i => i.kind === 'suelo').length, nV = items.filter(i => i.kind === 'nivel').length, nM = items.filter(i => i.kind === 'molino').length, nN = items.filter(i => i.kind === 'negocio').length, nZ = items.length - nL - nB - nR - nS - nV - nM - nN, parts = [];
+  if (nN) parts0.push(nN + (nN === 1 ? ' negocio' : ' negocios'));
   if (nM) parts0.push(nM + (nM === 1 ? ' molino' : ' molinos'));
   if (nS) parts0.push(nS + (nS === 1 ? ' trazo de suelo' : ' trazos de suelo')); if (nV) parts0.push(nV + (nV === 1 ? ' desnivel' : ' desniveles'));
   if (nR) parts0.push(nR + (nR === 1 ? ' zona de rocas' : ' zonas de rocas'));
@@ -112,12 +118,12 @@ function draw() {
   $('bSave').textContent = mode === 'bld' ? 'Guardar edificio' : area() ? 'Guardar zona' : 'Guardar línea'; $('bSave').hidden = !drawing();
 }
 function setMode(m) {
-  mode = m; for (const [id, k] of [['bWall', 'wall'], ['bRuin', 'ruin'], ['bBld', 'bld'], ['bGone', 'gone'], ['bDel', 'del'], ['bPhoto', 'photo'], ['bTree', 'tree'], ['bUntree', 'untree'], ['bUnwall', 'unwall'], ['bRock', 'rock'], ['bShape', 'shape'], ['bPaint', 'paint'], ['bNivel', 'nivel'], ['bMolino', 'molino']]) $(id).setAttribute('aria-pressed', String(k === m));
-  $('nudge').hidden = m !== 'photo'; $('paintBar').hidden = m !== 'paint'; $('nivelBar').hidden = m !== 'nivel'; $('toolName').textContent = TOOL[m]; status(HINT[m]); cv.style.cursor = m === 'paint' ? 'none' : 'crosshair';
+  mode = m; for (const [id, k] of [['bWall', 'wall'], ['bRuin', 'ruin'], ['bBld', 'bld'], ['bGone', 'gone'], ['bDel', 'del'], ['bPhoto', 'photo'], ['bTree', 'tree'], ['bUntree', 'untree'], ['bUnwall', 'unwall'], ['bRock', 'rock'], ['bShape', 'shape'], ['bPaint', 'paint'], ['bNivel', 'nivel'], ['bMolino', 'molino'], ['bNegocio', 'negocio']]) $(id).setAttribute('aria-pressed', String(k === m));
+  $('nudge').hidden = m !== 'photo'; $('paintBar').hidden = m !== 'paint'; $('nivelBar').hidden = m !== 'nivel'; $('negBar').hidden = m !== 'negocio'; $('toolName').textContent = TOOL[m]; status(HINT[m]); cv.style.cursor = m === 'paint' ? 'none' : 'crosshair';
   $('floors').hidden = m !== 'bld'; $('wmat').hidden = m !== 'wall'; $('whigh').hidden = !['wall', 'ruin', 'rock'].includes(m);
   if (!drawing()) cur = []; sel = null; $('confirm').hidden = true; $('edit').hidden = true; $('shapeBar').hidden = true; draw();
 }
-for (const [id, k] of [['bWall', 'wall'], ['bRuin', 'ruin'], ['bBld', 'bld'], ['bGone', 'gone'], ['bDel', 'del'], ['bPhoto', 'photo'], ['bTree', 'tree'], ['bUntree', 'untree'], ['bUnwall', 'unwall'], ['bRock', 'rock'], ['bShape', 'shape'], ['bPaint', 'paint'], ['bNivel', 'nivel'], ['bMolino', 'molino']]) $(id).onclick = () => setMode(k);
+for (const [id, k] of [['bWall', 'wall'], ['bRuin', 'ruin'], ['bBld', 'bld'], ['bGone', 'gone'], ['bDel', 'del'], ['bPhoto', 'photo'], ['bTree', 'tree'], ['bUntree', 'untree'], ['bUnwall', 'unwall'], ['bRock', 'rock'], ['bShape', 'shape'], ['bPaint', 'paint'], ['bNivel', 'nivel'], ['bMolino', 'molino'], ['bNegocio', 'negocio']]) $(id).onclick = () => setMode(k);
 // ajuste de la foto: flechas de 25 cm (norte arriba) y arrastre
 const showOff = () => { $('offTxt').textContent = (off[0] >= 0 ? '+' : '') + off[0].toFixed(2) + ' E, ' + (-off[1] >= 0 ? '+' : '') + (-off[1]).toFixed(2) + ' N m · ' + (fz * 100).toFixed(1) + ' % · ' + frot.toFixed(1) + '°'; };
 for (const [id, k] of [['zIn', 1.002], ['zOut', 1 / 1.002]]) $(id).onclick = () => { fz *= k; showOff(); draw(); };
@@ -204,13 +210,13 @@ async function resetAll() {
   cur = []; draw(); status(bad ? `Quedan ${bad} cosas sin borrar: vuelve a pulsar Empezar de cero` : 'Plano limpio: empieza de cero');
 }
 // panel de edición de lo mío: cambiar tipo, material, altura o plantas, o borrarlo
-const KINDS = { wall: 'Tapia', ruin: 'Ruina', building: 'Edificio', rocks: 'Rocas', grove: 'Zona de árboles', clear: 'Zona sin árboles', suelo: 'Trazo de suelo', nivel: 'Desnivel', molino: 'Molino' };
+const KINDS = { wall: 'Tapia', ruin: 'Ruina', building: 'Edificio', rocks: 'Rocas', grove: 'Zona de árboles', clear: 'Zona sin árboles', suelo: 'Trazo de suelo', nivel: 'Desnivel', molino: 'Molino', negocio: 'Negocio' };
 $('eDh').innerHTML = $('dh').innerHTML; $('eTalud').innerHTML = $('talud').innerHTML;
 function openEdit(it) {
   const line = it.kind === 'wall' || it.kind === 'ruin';
   $('eKind').innerHTML = (line ? ['wall', 'ruin'] : it.kind === 'grove' || it.kind === 'clear' ? ['grove', 'clear'] : [it.kind]).map(k => `<option value="${k}"${k === it.kind ? ' selected' : ''}>${KINDS[k]}</option>`).join('');
-  $('eMat').value = it.mat; $('eHigh').value = it.alto; $('eFloors').value = String(it.floors); if (it.kind === 'suelo') $('eSuelo').value = it.mat; if (it.kind === 'nivel') { $('eDh').value = String(it.dh); $('eTalud').value = it.talud; }
-  const upd = () => { const k = $('eKind').value; $('eMat').hidden = k !== 'wall'; $('eHigh').hidden = !['wall', 'ruin', 'rocks'].includes(k); $('eFloors').hidden = k !== 'building'; $('eSuelo').hidden = k !== 'suelo'; $('eDh').hidden = $('eTalud').hidden = k !== 'nivel'; };
+  $('eMat').value = it.mat; $('eHigh').value = it.alto; $('eFloors').value = String(it.floors); if (it.kind === 'suelo') $('eSuelo').value = it.mat; if (it.kind === 'nivel') { $('eDh').value = String(it.dh); $('eTalud').value = it.talud; } if (it.kind === 'negocio') { $('eName').value = it.raw.name || ''; $('eTipo').value = it.raw.tipo || 'otro'; }
+  const upd = () => { const k = $('eKind').value; $('eMat').hidden = k !== 'wall'; $('eHigh').hidden = !['wall', 'ruin', 'rocks'].includes(k); $('eFloors').hidden = k !== 'building'; $('eSuelo').hidden = k !== 'suelo'; $('eDh').hidden = $('eTalud').hidden = k !== 'nivel'; $('eName').hidden = $('eTipo').hidden = k !== 'negocio'; };
   sel.orig = it.p.map(q => q.slice()); it.p = it.p.map(q => q.slice());
   $('eKind').onchange = upd; upd(); $('edit').hidden = false; draw();
 }
@@ -226,6 +232,7 @@ $('eSave').onclick = async () => {
   if (k === 'building') doc.floors = +$('eFloors').value;
   if (k === 'suelo') doc.mat = $('eSuelo').value;
   if (k === 'nivel') { doc.dh = +$('eDh').value; doc.talud = $('eTalud').value; }
+  if (k === 'negocio') { doc.name = $('eName').value.trim() || it.raw.name || 'Negocio'; doc.tipo = $('eTipo').value; }
   sel = null; $('edit').hidden = true; draw(); status('Guardando…');
   try { await col.doc(it.id).set(doc); push(() => col.doc(it.id).set(prev), null, () => col.doc(it.id).set(doc)); status('Cambios guardados'); } catch (e) { status('No se ha podido guardar (' + (e.message || e.code) + ')'); }
 };
@@ -307,15 +314,24 @@ function tap(px, py) {
   }
   if (mode === 'del') { // lo mío más cercano: un edificio que contenga el toque o la línea más próxima
     let best = null, bd = 14 / view.s;
-    for (const it of items) if (it.kind === 'molino') { const d = Math.hypot(x - it.p[0][0], z - it.p[0][1]); if (d < Math.max(bd, 16 / view.s)) { bd = d; best = it; } } bd = 14 / view.s;
+    for (const it of items) if (it.kind === 'molino' || it.kind === 'negocio') { const d = Math.hypot(x - it.p[0][0], z - it.p[0][1]); if (d < Math.max(bd, 16 / view.s)) { bd = d; best = it; } } bd = 14 / view.s;
     for (let k = items.length - 1; k >= 0 && !best; k--) { const it = items[k]; if (it.kind === 'suelo') for (let i = 0; i < it.p.length; i++) { const a = it.p[Math.max(0, i - 1)], b = it.p[i], dx = b[0] - a[0], dz = b[1] - a[1], L = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L)); if (Math.hypot(x - a[0] - dx * t, z - a[1] - dz * t) < it.r + 4 / view.s) { best = it; break; } } }
-    if (!best) best = items.find(it => !['wall', 'ruin', 'suelo', 'nivel', 'molino'].includes(it.kind) && inside([x, z], it.p)) || items.find(it => it.kind === 'nivel' && inside([x, z], it.p)) || null;
+    if (!best) best = items.find(it => !['wall', 'ruin', 'suelo', 'nivel', 'molino', 'negocio'].includes(it.kind) && inside([x, z], it.p)) || items.find(it => it.kind === 'nivel' && inside([x, z], it.p)) || null;
     if (!best) for (const l of items) if (l.kind === 'wall' || l.kind === 'ruin') for (let i = 0; i < l.p.length - 1; i++) {
       const a = l.p[i], b = l.p[i + 1], dx = b[0] - a[0], dz = b[1] - a[1], L = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L)), d = Math.hypot(x - a[0] - dx * t, z - a[1] - dz * t);
       if (d < bd) { bd = d; best = l; }
     }
     sel = best ? { item: best } : null; $('confirm').hidden = true;
     if (best) openEdit(best); else { $('edit').hidden = true; draw(); }
+    return;
+  }
+  if (mode === 'negocio') { // un toque en la puerta, con su nombre
+    const name = $('negName').value.trim();
+    if (!name) { status('Escribe primero el nombre del negocio'); $('negName').focus(); return; }
+    if (Math.abs(x) > FAR || Math.abs(z) > FAR) { status('Fuera del mapa: el negocio tiene que estar a menos de 10 km del pueblo'); return; }
+    if (!col) { status('Sin conexión: el negocio no se ha guardado'); return; }
+    const doc = { kind: 'negocio', xy: [Math.round(x * 10) / 10, Math.round(z * 10) / 10], name, tipo: $('negTipo').value, at: Date.now() }, id = newId(); status('Guardando ' + name + '…');
+    col.doc(id).set(doc).then(() => { push(() => col.doc(id).delete(), null, () => col.doc(id).set(doc)); $('negName').value = ''; status(name + ' guardado. Escribe otro nombre para poner más'); }, e => status('No se ha podido guardar el negocio (' + (e.message || e.code) + ')'));
     return;
   }
   if (mode === 'molino') { // un toque y queda guardado
@@ -369,7 +385,7 @@ addEventListener('resize', resize); resize();
   col = db.collection('trazos'); colGone = db.collection('quitar'); draw();
   col.onSnapshot(snap => {
     clearTimeout(t);
-    items = snap.docs.map(d => { const v = d.data(), xy = v.xy || [], p = []; for (let i = 0; i + 1 < xy.length; i += 2) p.push([xy[i], xy[i + 1]]); return { id: d.id, raw: v, kind: v.kind, floors: v.floors || 2, mat: v.mat || 'piedra', alto: v.alto || 'media', r: v.r || 2, dh: v.dh ?? 1, talud: v.talud || 'medio', at: v.at || 0, p }; }).filter(l => l.p.length > (l.kind === 'suelo' || l.kind === 'molino' ? 0 : 1)).sort((a, b) => a.at - b.at);
+    items = snap.docs.map(d => { const v = d.data(), xy = v.xy || [], p = []; for (let i = 0; i + 1 < xy.length; i += 2) p.push([xy[i], xy[i + 1]]); return { id: d.id, raw: v, kind: v.kind, floors: v.floors || 2, mat: v.mat || 'piedra', alto: v.alto || 'media', r: v.r || 2, dh: v.dh ?? 1, talud: v.talud || 'medio', at: v.at || 0, p }; }).filter(l => l.p.length > (l.kind === 'suelo' || l.kind === 'molino' || l.kind === 'negocio' ? 0 : 1)).sort((a, b) => a.at - b.at);
     status('Todo guardado'); draw();
   }, e => { clearTimeout(t); status('No se pueden leer los trazos (' + (e.message || e.code) + ')'); });
   db.collection('ajuste').doc('foto').get().then(d => { if (d.exists) { const v = d.data(); off = [v.dx || 0, v.dz || 0]; fz = v.scale || 1; frot = v.rot || 0; offSaved = off.slice(); showOff(); draw(); } }).catch(() => {});

@@ -14,7 +14,7 @@ import { Missions, deliveryPoints } from './missions.js';
 import { Race } from './race.js';
 import { Police } from './police.js';
 import { Weather, weatherize } from './weather.js';
-import { Ambient } from './sound.js';
+import { Ambient, PlaneSound } from './sound.js';
 import { loadSave, writeSave } from './save.js';
 import { Shops, findShopSites } from './shops.js';
 import { Jobs } from './jobs.js';
@@ -23,6 +23,7 @@ import { Interiors } from './interiors.js';
 import { Outer } from './outer.js';
 import { Region, RegionTraffic } from './region.js';
 import { Molinos } from './molinos.js';
+import { Negocios } from './negocios.js';
 
 const isMobile = matchMedia('(pointer: coarse)').matches;
 const canvas = document.getElementById('game');
@@ -100,7 +101,7 @@ async function load(map) {
   const surfaces = [ground.material];
   roads.traverse(o => { if (o.isMesh && o.material?.map && !surfaces.includes(o.material)) surfaces.push(o.material); });
   buildings.traverse(o => { if (o.isMesh && (o.material?.map === tex.roof || o.material?.map === tex.flatRoof) && !surfaces.includes(o.material)) surfaces.push(o.material); });
-  return { data, terrain, colliders, trees, oFull, lamps: roads.userData.lamps, bellTower, tex, surfaces, sites, outer, oOuter, airfield, molinos };
+  return { data, terrain, colliders, trees, oFull, lamps: roads.userData.lamps, bellTower, tex, surfaces, sites, outer, oOuter, airfield, molinos, plano };
 }
 
 const input = new Input(canvas);
@@ -138,7 +139,7 @@ function waitForMap() {
 }
 const hud = { mode: document.getElementById('mode'), speed: document.getElementById('speed'), hint: document.getElementById('hint'), place: document.getElementById('place') };
 
-waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull, lamps, bellTower, tex, surfaces, sites, outer, oOuter, airfield, molinos }) => {
+waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFull, lamps, bellTower, tex, surfaces, sites, outer, oOuter, airfield, molinos, plano }) => {
   const world = { terrain, colliders, scene, personScale: data.personScale || 1 };
   const player = new Player(world); scene.add(player.mesh);
   if (outer) world.edge = outer.data.half - 250;
@@ -216,9 +217,10 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   const shops = new Shops({ scene, world, data, center, colliders, spawnVehicle, wallet: missions, toast, sound, sites, owned: (saved?.owned || []).map(v => v.kind) });
   const jobs = new Jobs({ scene, world, data, center, drops: deliveryPoints(data), ui, toast, sound, wallet: missions, personScale: world.personScale });
   jobs.extraDest = [shops.gasAt, jobs.farm].filter(Boolean); jobs.region = region;
+  const negocios = new Negocios(plano?.negocios, { terrain, roads: data.roads.filter(r => r.k !== 'path'), region }); scene.add(negocios.group); jobs.addNegocios(negocios.list); // negocios del plano: letrero y misiones
   const police = new Police({ scene, world, net, cars, scale: data.carScale || 1, isMobile, ui: { wanted: document.getElementById('wanted') }, toast, sound, wallet: missions });
   world.onHit = (w, c) => { if (c === driving) police.report('atropello'); };
-  const ambient = new Ambient(engine);
+  const ambient = new Ambient(engine), planeSound = new PlaneSound(engine);
   const plaza = new Plaza({ scene, world, data, center, isMobile, ambient });
   const interiors = new Interiors({ scene, world, data, center, tex, bellTower });
   const offerEl = document.getElementById('offer'), offerUI = { id: null, declined: false, accept: false, reject: false, txt: null }; let curOffer = null;
@@ -393,7 +395,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
         if (placeEl.textContent !== nm) placeEl.textContent = nm;
       }
     }
-    dayNight.update(dt, target);
+    dayNight.cloud = weather.cur.cloud; dayNight.update(dt, target);
     weather.inside = !!interiors.inside;
     weather.update(dt, interiors.inside ? new THREE.Vector3(0, -999, 0) : camera.position, dayNight, sun, hemi, sky);
     world.grip = weather.grip;
@@ -428,7 +430,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
       if (toll.t <= 0 && toll.k < toll.n) { const d = Math.hypot(target.x - bellTower.x, target.z - bellTower.z); if (d < 1200) engine.bell(196, (interiors.inside ? 0.12 : 0.4) / (1 + d / 70)); toll.k++; toll.t = 3.2; }
       if (toll.k >= toll.n) toll = null;
     }
-    ambient.update(dt, { day: 1 - dayNight.n, night: dayNight.n, rain: interiors.inside ? 0 : weather.cur.rain, wind: interiors.inside ? 0 : Math.max(weather.cur.snow, weather.cur.fog * 0.5), siren: police.siren, music: plaza.musicLevel, inside: !!interiors.inside });
+    ambient.update(dt, { day: 1 - dayNight.n, night: dayNight.n, rain: interiors.inside ? 0 : weather.cur.rain, wind: interiors.inside ? 0 : Math.max(weather.cur.snow, weather.cur.fog * 0.5), siren: police.siren, music: plaza.musicLevel, inside: !!interiors.inside , hour: dayNight.hour, open: !!outer && Math.hypot(target.x - (data.plaza?.start || data.spawn)[0], target.z - (data.plaza?.start || data.spawn)[1]) > 500 && !(region?.villageAt(target.x, target.z, 450))});
     if ((saveT -= dt) <= 0) { saveT = 10; save(); }
     // campanas: repican al pasar junto a la iglesia (como mucho una vez cada minuto y medio)
     if (bellTower) {
@@ -450,7 +452,8 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     // la sombra sigue al jugador
     sun.position.copy(target).addScaledVector(dayNight.light, 200); sun.target.position.copy(target);
 
-    if (flying) engine.update(true, 6 + flying.throttle * 12, flying.throttle, 1);
+    planeSound.update(!!flying || !!plane?.engine, flying ? flying.throttle : 0, flying ? Math.abs(flying.speed) : 0);
+    if (flying) engine.update(false, 0, 0, 1);
     else engine.update(!!driving, driving ? driving.speed : 0, driving ? input.axes().y : 0, driving ? driving.gear : 1);
     const offer = race.offer || jobs.offer || missions.offer || shops.offer || null;
     if ((offer?.id || null) !== offerUI.id) { offerUI.id = offer?.id || null; offerUI.declined = false; }

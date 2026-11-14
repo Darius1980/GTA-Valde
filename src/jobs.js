@@ -38,6 +38,20 @@ export class Jobs {
     this.fare = makeCharacter({ shirt: 0x8a3a6a, pants: 0x30343a, hair: 0x9a9a9a }); this.fare.scale.setScalar(personScale); this.fare.visible = false; scene.add(this.fare);
     this.state = 'idle'; this.cool = 0; this.taxiT = 3; this.job = null;
   }
+  // negocios del plano: cada uno ofrece repartos y es destino del taxi
+  addNegocios(list) {
+    this.negocios = list || [];
+    for (const n of this.negocios) {
+      const d = { id: 'neg', neg: n, icon: '📦', name: `Reparto de ${n.name}`, at: n.at, color: 0xffb300, needsCar: true };
+      d.marker = beam(d.color); d.marker.scale.set(1, 0.55, 1); this.scene.add(d.marker); this.place(d.marker, d.at); this.defs.push(d);
+    }
+  }
+  // un destino lejano: ruta por carretera para el minimapa y tiempo según los kilómetros
+  goFar(dest, name, pos) {
+    const pts = this.region?.route([pos.x, pos.z], dest), L = pts ? pts.reduce((a, q, i) => i ? a + Math.hypot(q[0] - pts[i - 1][0], q[1] - pts[i - 1][1]) : 0, 0) : Math.hypot(dest[0] - pos.x, dest[1] - pos.z) * 1.3;
+    if (pts) this.route = [...pts, dest];
+    this.destName = name; this.place(this.dropM, dest); this.dropM.visible = true; this.time = Math.round(45 + L / 11); this.fareDist = L; return L;
+  }
   place(m, [x, z]) { m.position.set(x, this.world.terrain.height(x, z), z); m.userData.at = [x, z]; }
   get active() { return this.state !== 'idle'; }
   get target() { return this.state === 'go' ? this.dropM.userData.at : this.state === 'pickup' ? this.job.at : null; }
@@ -61,8 +75,31 @@ export class Jobs {
     } else if (d.id === 'correo') {
       this.left = 4; this.toast('✉️ El correo', 'Reparte 4 cartas por las casas, a pie o en coche');
       this.nextLetter(pos);
+    } else if (d.id === 'neg') {
+      // reparto: a otro negocio (si hay) o a una casa del pueblo
+      this.left = 1; this.destName = null; this.route = null; const n = d.neg;
+      const others = (this.negocios || []).filter(o => o !== n && Math.hypot(o.at[0] - pos.x, o.at[1] - pos.z) > 80 && Math.hypot(o.at[0] - pos.x, o.at[1] - pos.z) < 9000);
+      if (others.length && Math.random() < 0.6) {
+        const o = others[Math.floor(Math.random() * others.length)], far = Math.hypot(o.at[0] - pos.x, o.at[1] - pos.z) > 700;
+        if (far) this.goFar(o.at, o.name, pos); else { this.destName = o.name; this.setDrop(o.at, pos, 5); this.fareDist = Math.hypot(o.at[0] - pos.x, o.at[1] - pos.z); }
+        this.toast(`📦 ${n.name}`, `Lleva este pedido a ${o.name} sin darte golpes`);
+      } else {
+        const away = this.region && Math.hypot(pos.x - this.center[0], pos.z - this.center[1]) > 1500;
+        const pool = (away ? this.region.spotsNear(pos.x, pos.z, 100, 450) : this.drops).filter(p => { const k = Math.hypot(p[0] - pos.x, p[1] - pos.z); return k > 100 && k < 500; });
+        const dest = pool[Math.floor(Math.random() * pool.length)] || this.drops[0];
+        this.toast(`📦 ${n.name}`, 'Lleva el pedido a la casa de la marca verde sin darte golpes');
+        this.setDrop(dest, pos, 5); this.fareDist = Math.hypot(dest[0] - pos.x, dest[1] - pos.z);
+      }
     } else {
       this.left = 1; this.fare.visible = false; this.destName = null; this.route = null;
+      // a veces el pasajero quiere ir a un negocio del plano
+      const negs = (this.negocios || []).filter(o => { const k = Math.hypot(o.at[0] - pos.x, o.at[1] - pos.z); return k > 200 && k < 12000; });
+      if (negs.length && Math.random() < 0.45) {
+        const o = negs[Math.floor(Math.random() * negs.length)], k = Math.hypot(o.at[0] - pos.x, o.at[1] - pos.z);
+        const L = k > 700 ? this.goFar(o.at, o.name, pos) : (this.destName = o.name, this.setDrop(o.at, pos, 4.2), this.fareDist = k);
+        this.toast('🚕 ¡Sube!', `Lléveme a ${o.icon} ${o.name}, por favor` + (L > 1000 ? ` · ${(L / 1000).toFixed(1)} km` : ''));
+        d.marker.visible = false; return;
+      }
       // destino: otro pueblo de la comarca (casi siempre) o, a veces, la otra punta del pueblo
       const R = this.region, here = R?.villageAt(pos.x, pos.z, 1500);
       const away = here && !here.main, trips = [];
@@ -101,7 +138,7 @@ export class Jobs {
       const taxi = this.defs.find(d => d.id === 'taxi');
       if (!taxi.at) { this.taxiT -= dt; if (this.taxiT <= 0) this.newFare(pos); }
       for (const d of this.defs) {
-        d.marker.visible = !!d.at && this.cool <= 0 && !busy;
+        d.marker.visible = !!d.at && this.cool <= 0 && !busy && (d.id !== 'neg' || Math.hypot(pos.x - d.at[0], pos.z - d.at[1]) < 700);
         if (d.id === 'taxi' && !(this.fareWalk > 0)) { this.fare.visible = d.marker.visible; if (this.fare.visible) { this.fare.lookAt(pos.x, this.fare.position.y, pos.z); animateCharacter(this.fare, 0, dt); } }
         if (!d.marker.visible) continue;
         const near = Math.hypot(pos.x - d.at[0], pos.z - d.at[1]) < 3.5;
@@ -113,28 +150,29 @@ export class Jobs {
     const d = this.job; this.time -= dt;
     if (d.needsCar && driving) { // golpes con la carga
       if (this._h0 === undefined) this._h0 = driving.health;
-      if (driving.health < this._h0 - 2) { this.hits++; this._h0 = driving.health; if (d.id === 'leche') this.toast('🥛 ¡Cuidado!', 'Se ha derramado algo de leche: -10 €'); if (d.id === 'taxi') this.toast('🚕 ¡Ay!', 'Al pasajero no le ha gustado el golpe'); }
+      if (driving.health < this._h0 - 2) { this.hits++; this._h0 = driving.health; if (d.id === 'leche') this.toast('🥛 ¡Cuidado!', 'Se ha derramado algo de leche: -10 €'); if (d.id === 'taxi') this.toast('🚕 ¡Ay!', 'Al pasajero no le ha gustado el golpe'); if (d.id === 'neg') this.toast('📦 ¡Cuidado!', 'Se ha roto algo del pedido: -5 €'); }
     }
-    if (d.needsCar && !driving) { this.fail(d.id === 'taxi' ? 'El pasajero se ha bajado enfadado' : 'Has dejado la leche tirada'); return; }
+    if (d.needsCar && !driving) { this.fail(d.id === 'taxi' ? 'El pasajero se ha bajado enfadado' : d.id === 'neg' ? 'Has dejado el pedido tirado' : 'Has dejado la leche tirada'); return; }
     if (Math.hypot(pos.x - this.dropM.userData.at[0], pos.z - this.dropM.userData.at[1]) < 3.6 && (!driving || Math.abs(driving.speed) < 4)) {
       let pay;
       if (d.id === 'leche') pay = Math.max(15, 70 + Math.round(Math.max(0, this.time)) - this.hits * 10);
       else if (d.id === 'correo') pay = 12 + Math.max(0, Math.round(this.time / 2));
+      else if (d.id === 'neg') pay = Math.round(18 + Math.min(this.fareDist, 1500) * 0.05 + Math.max(0, this.fareDist - 1500) * 0.025 + Math.max(0, this.time) * 0.5 - this.hits * 5);
       else pay = Math.round(15 + Math.min(this.fareDist, 1500) * 0.06 + Math.max(0, this.fareDist - 1500) * 0.03 + Math.max(0, this.time) * 0.6 - this.hits * 5);
       pay = Math.max(5, pay); this.wallet.money += pay; this.earned += pay; this.left--; this.sound?.('ok');
       if (this.left > 0) { this.toast(`+${pay} €`, `Quedan ${this.left} cartas`); this.nextLetter(pos); }
       else {
         if (d.id === 'taxi') { const [x, z] = this.dropM.userData.at; this.fare.position.set(x + 1.5, this.world.terrain.height(x, z), z); this.fare.visible = true; this.fareWalk = 5; }
-        this.toast(d.id === 'taxi' ? (this.destName ? `🚕 ¡Ya estamos en ${this.destName}!` : '🚕 Carrera completada') : '¡Trabajo hecho!', `Has ganado ${this.earned} €`); this.finish();
+        this.toast(d.id === 'taxi' ? (this.destName ? `🚕 ¡Ya estamos en ${this.destName}!` : '🚕 Carrera completada') : d.id === 'neg' ? (this.destName ? `📦 Pedido entregado en ${this.destName}` : '📦 Pedido entregado') : '¡Trabajo hecho!', `Has ganado ${this.earned} €`); this.finish();
       }
-    } else if (this.time <= 0) this.fail(d.id === 'leche' ? 'La leche se ha calentado' : d.id === 'taxi' ? 'El pasajero ha llegado tarde y no te paga' : 'Se acabó el tiempo del reparto');
+    } else if (this.time <= 0) this.fail(d.id === 'leche' ? 'La leche se ha calentado' : d.id === 'taxi' ? 'El pasajero ha llegado tarde y no te paga' : d.id === 'neg' ? 'El pedido ha llegado tarde' : 'Se acabó el tiempo del reparto');
     if (this.route) { // la ruta del minimapa se va recortando según avanzas
       const rt = this.route; let cut = 0;
       for (let i = 0; i < Math.min(rt.length, 30); i++) if (Math.hypot(rt[i][0] - pos.x, rt[i][1] - pos.z) < 30) cut = i;
       if (cut) rt.splice(0, cut);
     }
     const left = this.destName ? ` a ${this.destName} · ${(Math.hypot(this.dropM.userData.at[0] - pos.x, this.dropM.userData.at[1] - pos.z) / 1000).toFixed(1)} km` : '';
-    const label = d.id === 'correo' ? `✉️ Carta ${5 - this.left}/4` : `${d.icon} ${d.id === 'taxi' ? 'Lleva al pasajero' + left : 'A la cooperativa'}`;
+    const label = d.id === 'correo' ? `✉️ Carta ${5 - this.left}/4` : `${d.icon} ${d.id === 'taxi' ? 'Lleva al pasajero' + left : d.id === 'neg' ? 'Lleva el pedido' + left : 'A la cooperativa'}`;
     const txt = `${label} · <b class="${this.time < 10 ? 'late' : ''}">${Math.max(0, Math.ceil(this.time))} s</b>`;
     if (this.ui.mission.innerHTML !== txt) this.ui.mission.innerHTML = txt;
   }

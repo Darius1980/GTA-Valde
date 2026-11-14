@@ -149,14 +149,15 @@ export class DayNight {
 
     // estrellas y luna
     const t = performance.now() / 1000;
-    this.starMat.uniforms.uN.value = this.n; this.starMat.uniforms.uTime.value = t;
+    const clear = 1 - smooth(0.15, 0.6, this.cloud || 0); // con nubes, lluvia o niebla no se ven las estrellas
+    this.starMat.uniforms.uN.value = this.n * clear; this.stars.visible = clear > 0.02; this.starMat.uniforms.uTime.value = t;
     this.stars.position.copy(focus);
     this.moon.position.copy(focus).addScaledVector(this.moonDir, 3000);
     this.moon.visible = mo.elev > -3 && illum > 0.03;
-    this.moon.material.opacity = 0.35 + 0.65 * smooth(0.1, 0.6, this.n);
+    this.moon.material.opacity = (0.35 + 0.65 * smooth(0.1, 0.6, this.n)) * (1 - 0.85 * smooth(0.3, 0.8, this.cloud || 0));
 
     // estrella fugaz de vez en cuando
-    if (this.n > 0.85) {
+    if (this.n > 0.85 && clear > 0.9) {
       this.nextMeteor -= dt;
       if (this.nextMeteor <= 0 && !this.m) {
         this.nextMeteor = 12 + Math.random() * 30;
