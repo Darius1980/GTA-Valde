@@ -44,7 +44,7 @@ export class Negocios {
       const board = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.75), mat); board.position.y = 2.55; s.add(board);
       for (const k of [-1, 1]) { const p = new THREE.Mesh(postG, post); p.position.set(k * 1.05, 1.5, -0.02); s.add(p); }
       const dx = front[0] - x, dz = front[1] - z, d = Math.hypot(dx, dz);
-      const px = d > 1 ? x + dx / d * Math.min(1.2, d * 0.4) : x, pz = d > 1 ? z + dz / d * Math.min(1.2, d * 0.4) : z;
+      const k = d > 2.5 ? (d - 2.5) / d : 0, px = x + dx * k, pz = z + dz * k; // a 2,5 m de la calle, delante de la fachada
       s.position.set(px, Math.min(y, terrain.height(px, pz)), pz); if (d > 0.5) s.rotation.y = Math.atan2(dx, dz);
       s.traverse(o => { o.castShadow = true; }); this.group.add(s);
     }
