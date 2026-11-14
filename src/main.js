@@ -183,8 +183,9 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   // ciclo de día y noche
   const dayNight = new DayNight({ scene, sky, sun, hemi, renderer, isMobile });
   dayNight.setLamps(lamps);
-  const headlight = new THREE.SpotLight(0xfff2d0, 0, 55, 0.55, 0.5, 1.2); headlight.position.set(0, 0.8, 2.2); headlight.target.position.set(0, 0, 14);
-  headlight.add(headlight.target); scene.add(headlight);
+  const headlight = new THREE.SpotLight(0xfff2d0, 0, 160, 0.42, 0.45, 1); headlight.position.set(0, 0.8, 2.2); headlight.target.position.set(0, -1, 40); // largas
+  headlight.add(headlight.target);
+  const nearBeam = new THREE.SpotLight(0xfff2d0, 0, 45, 0.85, 0.6, 1.2); nearBeam.target.position.set(0, -1.5, 9); nearBeam.add(nearBeam.target); headlight.add(nearBeam); // cortas, abiertas delante del coche scene.add(headlight);
   // misiones de reparto
   const start = data.plaza?.start || [data.spawn[0] + 4, data.spawn[1]];
   const ui = { mission: document.getElementById('mission'), money: document.getElementById('money'), toast: document.getElementById('toast') };
@@ -220,6 +221,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
   const negocios = new Negocios(plano?.negocios, { terrain, roads: data.roads.filter(r => r.k !== 'path'), region }); scene.add(negocios.group); jobs.addNegocios(negocios.list); // negocios del plano: letrero y misiones
   const police = new Police({ scene, world, net, cars, scale: data.carScale || 1, isMobile, ui: { wanted: document.getElementById('wanted') }, toast, sound, wallet: missions });
   world.onHit = (w, c) => { if (c === driving) police.report('atropello'); };
+  const _lisDir = new THREE.Vector3(), _lis = { x: 0, z: 0, fx: 0, fz: 1 }; // oyente: la cámara
   const ambient = new Ambient(engine), planeSound = new PlaneSound(engine);
   const plaza = new Plaza({ scene, world, data, center, isMobile, ambient });
   const interiors = new Interiors({ scene, world, data, center, tex, bellTower });
@@ -403,7 +405,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     animals.update(dt, target, cars, dayNight);
     const nf = dayNight.n;
     for (const c of cars) c.setLights(c.ai || c === driving ? nf : 0, c === driving ? input.brake || (input.axes().y < 0 && driving.speed > 0.5) : c.ai && c.speed < 1);
-    headlight.intensity = driving ? 60 * nf : 0;
+    headlight.intensity = driving ? 700 * nf : 0; nearBeam.intensity = driving ? 160 * nf : 0;
     missions.update(dt, target);
     race.update(dt, driving, target);
     jobs.update(dt, target, driving); jobs.tick(dt);
@@ -430,7 +432,8 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
       if (toll.t <= 0 && toll.k < toll.n) { const d = Math.hypot(target.x - bellTower.x, target.z - bellTower.z); if (d < 1200) engine.bell(196, (interiors.inside ? 0.12 : 0.4) / (1 + d / 70)); toll.k++; toll.t = 3.2; }
       if (toll.k >= toll.n) toll = null;
     }
-    ambient.update(dt, { day: 1 - dayNight.n, night: dayNight.n, rain: interiors.inside ? 0 : weather.cur.rain, wind: interiors.inside ? 0 : Math.max(weather.cur.snow, weather.cur.fog * 0.5), siren: police.siren, music: plaza.musicLevel, inside: !!interiors.inside , hour: dayNight.hour, open: !!outer && Math.hypot(target.x - (data.plaza?.start || data.spawn)[0], target.z - (data.plaza?.start || data.spawn)[1]) > 500 && !(region?.villageAt(target.x, target.z, 450))});
+    camera.getWorldDirection(_lisDir); { const l = Math.hypot(_lisDir.x, _lisDir.z) || 1; _lis.x = camera.position.x; _lis.z = camera.position.z; _lis.fx = _lisDir.x / l; _lis.fz = _lisDir.z / l; }
+    ambient.update(dt, { lis: _lis, animals, day: 1 - dayNight.n, night: dayNight.n, rain: interiors.inside ? 0 : weather.cur.rain, wind: interiors.inside ? 0 : Math.max(weather.cur.snow, weather.cur.fog * 0.5), siren: police.siren, music: plaza.musicLevel, inside: !!interiors.inside , hour: dayNight.hour, open: !!outer && Math.hypot(target.x - (data.plaza?.start || data.spawn)[0], target.z - (data.plaza?.start || data.spawn)[1]) > 500 && !(region?.villageAt(target.x, target.z, 450))});
     if ((saveT -= dt) <= 0) { saveT = 10; save(); }
     // campanas: repican al pasar junto a la iglesia (como mucho una vez cada minuto y medio)
     if (bellTower) {
@@ -487,7 +490,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     try { step(); } catch (e) { if (errs++ < 5) console.error(e); try { input.endFrame(); } catch (_) {} }
     requestAnimationFrame(frame);
   }
-  window.__game = { region, regionTraffic, plane, get flying() { return flying; }, data, outer, weather, police, shops, jobs, plaza, interiors, save, animals, player, cars, walkers, race, camera, scene, renderer, terrain, dayNight, missions, get driving() { return driving; } };
+  window.__game = { region, regionTraffic, plane, ambient, engine, get flying() { return flying; }, data, outer, weather, police, shops, jobs, plaza, interiors, save, animals, player, cars, walkers, race, camera, scene, renderer, terrain, dayNight, missions, get driving() { return driving; } };
   frame();
 }).catch(e => { console.error(e); document.getElementById('lmsg').textContent = 'Error cargando: ' + e.message; });
 

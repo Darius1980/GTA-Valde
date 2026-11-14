@@ -76,30 +76,37 @@ export class EngineSound {
     if (this.ctx) return;
     try {
       const C = window.AudioContext || window.webkitAudioContext, ctx = this.ctx = new C();
-      // motor de 4 cilindros: onda con armónicos que caen deprisa (sin el zumbido de la sierra y la cuadrada),
-      // dos osciladores algo desafinados, un grave por debajo, saturación suave y agudos recortados
-      const re = new Float32Array(24), im = new Float32Array(24);
-      for (let n = 1; n < 24; n++) im[n] = (n === 2 ? 1.4 : n === 4 ? 0.7 : 1) / Math.pow(n, 1.5);
-      const wave = ctx.createPeriodicWave(re, im);
-      const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), sub = ctx.createOscillator();
-      o1.setPeriodicWave(wave); o2.setPeriodicWave(wave); sub.type = 'sine';
-      const mix = ctx.createGain(); mix.gain.value = 0.5;
-      const subG = ctx.createGain(); subG.gain.value = 0.6;
+      // motor de 4 cilindros de verdad: un bucle de explosiones (cada una un golpe seco con su resonancia y algo de
+      // ruido), con las pequeñas diferencias entre cilindros y entre ciclos que le dan el petardeo. La velocidad de
+      // reproducción sigue las revoluciones; el escape (filtros fijos) da el cuerpo grave del coche.
+      const R0 = 40, N = 160, sr = ctx.sampleRate, len = Math.round(N / R0 * sr), buf = ctx.createBuffer(1, len, sr), d0 = buf.getChannelData(0);
+      const cyl = [1, 0.8, 0.93, 0.76];
+      for (let i = 0; i < N; i++) {
+        const st = Math.round((i + (Math.random() - 0.5) * 0.06) / R0 * sr), A = cyl[i % 4] * (0.85 + Math.random() * 0.3), ring = 85 + Math.random() * 20;
+        for (let k = 0; k < sr * 0.022; k++) {
+          const t = k / sr, j = (st + k + len) % len;
+          d0[j] += A * (Math.exp(-t / 0.004) * Math.sin(2 * Math.PI * ring * t) * 0.9 + (Math.random() * 2 - 1) * Math.exp(-t / 0.0018) * 0.45 + Math.exp(-t / 0.0009) * 0.6);
+        }
+      }
+      let mx = 0; for (let i = 0; i < len; i++) mx = Math.max(mx, Math.abs(d0[i])); for (let i = 0; i < len; i++) d0[i] /= mx;
+      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true; src.playbackRate.value = 0.7;
       const sh = ctx.createWaveShaper(), curve = new Float32Array(1024);
-      for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; curve[i] = Math.tanh(1.8 * x) / Math.tanh(1.8); }
+      for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; curve[i] = Math.tanh(2.2 * x) / Math.tanh(2.2); }
       sh.curve = curve;
-      const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 300; f.Q.value = 0.6;
-      const shelf = ctx.createBiquadFilter(); shelf.type = 'highshelf'; shelf.frequency.value = 1800; shelf.gain.value = -14;
+      const body = ctx.createBiquadFilter(); body.type = 'peaking'; body.frequency.value = 110; body.Q.value = 1.1; body.gain.value = 7;
+      const box = ctx.createBiquadFilter(); box.type = 'peaking'; box.frequency.value = 420; box.Q.value = 1.4; box.gain.value = 3;
+      const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 600; f.Q.value = 0.5;
+      const shelf = ctx.createBiquadFilter(); shelf.type = 'highshelf'; shelf.frequency.value = 2500; shelf.gain.value = -12;
       const gn = ctx.createGain(); gn.gain.value = 0;
-      o1.connect(mix); o2.connect(mix); sub.connect(subG); subG.connect(f); mix.connect(sh); sh.connect(f); f.connect(shelf); shelf.connect(gn); gn.connect(ctx.destination);
+      src.connect(sh); sh.connect(body); body.connect(box); box.connect(f); f.connect(shelf); shelf.connect(gn); gn.connect(ctx.destination);
       // rodadura y aire: ruido grave que crece con la velocidad
       const nb = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate), d = nb.getChannelData(0); let last = 0;
       for (let i = 0; i < d.length; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; d[i] = last * 3.5; }
       const ns = ctx.createBufferSource(); ns.buffer = nb; ns.loop = true;
       const nf = ctx.createBiquadFilter(); nf.type = 'lowpass'; nf.frequency.value = 500;
       const roadG = ctx.createGain(); roadG.gain.value = 0; ns.connect(nf); nf.connect(roadG); roadG.connect(ctx.destination);
-      o1.start(); o2.start(); sub.start(); ns.start();
-      Object.assign(this, { o1, o2, sub, f, gn, roadG, nf });
+      src.start(); ns.start();
+      Object.assign(this, { src, f, gn, roadG, nf, R0 });
     } catch (e) { this.ctx = null; }
   }
   // reverberación sencilla (eco de la plaza y del valle) para las campanas
@@ -149,10 +156,10 @@ export class EngineSound {
     const t = this.ctx.currentTime;
     // rpm según la marcha: la corta llega arriba a ~13,5 m/s y la larga a ~29 m/s
     const v = Math.abs(speed), rpm = 0.2 + Math.min(1.05, v / (gear === 2 ? 29 : 13.5)) * 0.7 + Math.abs(throttle) * 0.06;
-    const base = 30 + rpm * 85; // frecuencia de explosiones: ralentí ~45 Hz, alto de vueltas ~120 Hz
-    this.o1.frequency.setTargetAtTime(base, t, 0.08); this.o2.frequency.setTargetAtTime(base * 1.007, t, 0.08); this.sub.frequency.setTargetAtTime(base * 0.5, t, 0.08);
-    this.f.frequency.setTargetAtTime(180 + rpm * 520 + Math.abs(throttle) * 260, t, 0.08);
-    this.gn.gain.setTargetAtTime(on ? 0.06 + 0.05 * Math.abs(throttle) : 0, t, 0.2);
+    const firing = (800 + Math.min(1, rpm - 0.2) * 5600) / 30; // explosiones por segundo: ralentí 800 rpm ≈ 27 Hz
+    this.src.playbackRate.setTargetAtTime(firing / this.R0, t, 0.09);
+    this.f.frequency.setTargetAtTime(380 + rpm * 900 + Math.abs(throttle) * 900, t, 0.08); // con gas, más bronco
+    this.gn.gain.setTargetAtTime(on ? 0.11 + 0.07 * Math.abs(throttle) : 0, t, 0.2);
     this.roadG.gain.setTargetAtTime(on ? Math.min(0.09, v * 0.0035) : 0, t, 0.3);
     this.nf.frequency.setTargetAtTime(300 + v * 25, t, 0.3);
   }
