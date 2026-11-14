@@ -75,22 +75,65 @@ export class EngineSound {
   start() {
     if (this.ctx) return;
     try {
-      const C = window.AudioContext || window.webkitAudioContext; this.ctx = new C();
-      const o1 = this.ctx.createOscillator(), o2 = this.ctx.createOscillator(), f = this.ctx.createBiquadFilter(), gn = this.ctx.createGain();
-      o1.type = 'sawtooth'; o2.type = 'square'; f.type = 'lowpass'; f.frequency.value = 400; gn.gain.value = 0;
-      o1.connect(f); o2.connect(f); f.connect(gn); gn.connect(this.ctx.destination); o1.start(); o2.start();
-      Object.assign(this, { o1, o2, f, gn });
+      const C = window.AudioContext || window.webkitAudioContext, ctx = this.ctx = new C();
+      // motor de 4 cilindros: onda con armónicos que caen deprisa (sin el zumbido de la sierra y la cuadrada),
+      // dos osciladores algo desafinados, un grave por debajo, saturación suave y agudos recortados
+      const re = new Float32Array(24), im = new Float32Array(24);
+      for (let n = 1; n < 24; n++) im[n] = (n === 2 ? 1.4 : n === 4 ? 0.7 : 1) / Math.pow(n, 1.5);
+      const wave = ctx.createPeriodicWave(re, im);
+      const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), sub = ctx.createOscillator();
+      o1.setPeriodicWave(wave); o2.setPeriodicWave(wave); sub.type = 'sine';
+      const mix = ctx.createGain(); mix.gain.value = 0.5;
+      const subG = ctx.createGain(); subG.gain.value = 0.6;
+      const sh = ctx.createWaveShaper(), curve = new Float32Array(1024);
+      for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; curve[i] = Math.tanh(1.8 * x) / Math.tanh(1.8); }
+      sh.curve = curve;
+      const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 300; f.Q.value = 0.6;
+      const shelf = ctx.createBiquadFilter(); shelf.type = 'highshelf'; shelf.frequency.value = 1800; shelf.gain.value = -14;
+      const gn = ctx.createGain(); gn.gain.value = 0;
+      o1.connect(mix); o2.connect(mix); sub.connect(subG); subG.connect(f); mix.connect(sh); sh.connect(f); f.connect(shelf); shelf.connect(gn); gn.connect(ctx.destination);
+      // rodadura y aire: ruido grave que crece con la velocidad
+      const nb = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate), d = nb.getChannelData(0); let last = 0;
+      for (let i = 0; i < d.length; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; d[i] = last * 3.5; }
+      const ns = ctx.createBufferSource(); ns.buffer = nb; ns.loop = true;
+      const nf = ctx.createBiquadFilter(); nf.type = 'lowpass'; nf.frequency.value = 500;
+      const roadG = ctx.createGain(); roadG.gain.value = 0; ns.connect(nf); nf.connect(roadG); roadG.connect(ctx.destination);
+      o1.start(); o2.start(); sub.start(); ns.start();
+      Object.assign(this, { o1, o2, sub, f, gn, roadG, nf });
     } catch (e) { this.ctx = null; }
   }
-  // tañido de campana: parciales inarmónicos con caída larga
+  // reverberación sencilla (eco de la plaza y del valle) para las campanas
+  reverb() {
+    if (this.rev) return this.rev;
+    const ctx = this.ctx, L = ctx.sampleRate * 3.2 | 0, ir = ctx.createBuffer(2, L, ctx.sampleRate);
+    for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < L; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / L, 3.2) * (i < 900 ? i / 900 : 1); }
+    const cv = ctx.createConvolver(); cv.buffer = ir; const wet = ctx.createGain(); wet.gain.value = 0.35;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2600;
+    cv.connect(wet); wet.connect(lp); lp.connect(ctx.destination);
+    return (this.rev = cv);
+  }
+  // campanada de bronce: parciales de campana de iglesia (hum, fundamental, tercera menor, quinta, nominal...),
+  // cada uno en dos osciladores casi iguales para el batido, golpe del badajo y eco
   bell(freq, vol = 0.25) {
     if (!this.ctx) return;
-    const t = this.ctx.currentTime, out = this.ctx.createGain(); out.gain.value = vol; out.connect(this.ctx.destination);
-    for (const [r, a, d] of [[0.5, 0.5, 5], [1, 1, 3.5], [1.19, 0.6, 2.5], [1.5, 0.45, 2], [2, 0.35, 1.6], [2.52, 0.25, 1.1], [3.01, 0.15, 0.8]]) {
-      const o = this.ctx.createOscillator(), g = this.ctx.createGain(); o.type = 'sine'; o.frequency.value = freq * r;
-      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(a * 0.2, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
-      o.connect(g); g.connect(out); o.start(t); o.stop(t + d + 0.1);
+    const ctx = this.ctx, t = ctx.currentTime + 0.01, out = ctx.createGain(); out.gain.value = vol;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3200;
+    out.connect(lp); lp.connect(ctx.destination); lp.connect(this.reverb());
+    for (const [r, a, d] of [[0.5, 0.55, 9], [1, 0.75, 6], [1.2, 0.5, 4.5], [1.5, 0.22, 3], [2, 0.6, 3.5], [2.5, 0.12, 1.8], [3, 0.14, 1.6], [4.1, 0.05, 0.9]]) {
+      for (const det of [-0.0012, 0.0012]) {
+        const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = freq * r * (1 + det);
+        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(a * 0.09, t + 0.004); g.gain.setTargetAtTime(0, t + 0.004, d / 5);
+        o.connect(g); g.connect(out); o.start(t); o.stop(t + d + 0.2);
+      }
     }
+    if (!this.clang) { // golpe metálico corto del badajo
+      const b = ctx.createBuffer(1, ctx.sampleRate * 0.08 | 0, ctx.sampleRate), d = b.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.012));
+      this.clang = b;
+    }
+    const s = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain(); s.buffer = this.clang;
+    bp.type = 'bandpass'; bp.frequency.value = freq * 5; bp.Q.value = 2; g.gain.value = 0.12;
+    s.connect(bp); bp.connect(g); g.connect(out); s.start(t);
   }
   blip(kind) {
     if (!this.ctx) return;
@@ -105,10 +148,12 @@ export class EngineSound {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     // rpm según la marcha: la corta llega arriba a ~13,5 m/s y la larga a ~29 m/s
-    const v = Math.abs(speed), rpm = 0.22 + Math.min(1.1, v / (gear === 2 ? 29 : 13.5)) * 0.75;
-    const base = 38 + rpm * 90;
-    this.o1.frequency.setTargetAtTime(base, t, 0.05); this.o2.frequency.setTargetAtTime(base * 0.5, t, 0.05);
-    this.f.frequency.setTargetAtTime(250 + rpm * 900 + throttle * 400, t, 0.05);
-    this.gn.gain.setTargetAtTime(on ? 0.05 + 0.05 * Math.abs(throttle) : 0, t, 0.15);
+    const v = Math.abs(speed), rpm = 0.2 + Math.min(1.05, v / (gear === 2 ? 29 : 13.5)) * 0.7 + Math.abs(throttle) * 0.06;
+    const base = 30 + rpm * 85; // frecuencia de explosiones: ralentí ~45 Hz, alto de vueltas ~120 Hz
+    this.o1.frequency.setTargetAtTime(base, t, 0.08); this.o2.frequency.setTargetAtTime(base * 1.007, t, 0.08); this.sub.frequency.setTargetAtTime(base * 0.5, t, 0.08);
+    this.f.frequency.setTargetAtTime(180 + rpm * 520 + Math.abs(throttle) * 260, t, 0.08);
+    this.gn.gain.setTargetAtTime(on ? 0.06 + 0.05 * Math.abs(throttle) : 0, t, 0.2);
+    this.roadG.gain.setTargetAtTime(on ? Math.min(0.09, v * 0.0035) : 0, t, 0.3);
+    this.nf.frequency.setTargetAtTime(300 + v * 25, t, 0.3);
   }
 }

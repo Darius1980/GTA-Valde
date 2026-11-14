@@ -284,7 +284,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
 
   const clock = new THREE.Clock();
   const tmp = new THREE.Vector3(); let frameNo = 0;
-  function frame() {
+  function step() {
     const dt = Math.min(0.05, clock.getDelta());
     const look = input.consumeLook();
     camState.yaw -= look.dx * 0.0035; camState.pitch = THREE.MathUtils.clamp(camState.pitch + look.dy * 0.0025, -0.25, 1.2);
@@ -425,7 +425,7 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     if (hNow !== lastHour) { lastHour = hNow; if (bellTower && engine.ctx) toll = { n: hNow % 12 || 12, k: 0, t: 0 }; }
     if (toll && bellTower) {
       toll.t -= dt;
-      if (toll.t <= 0 && toll.k < toll.n) { const d = Math.hypot(target.x - bellTower.x, target.z - bellTower.z); if (d < 1200) engine.bell(294, (interiors.inside ? 0.1 : 0.32) / (1 + d / 70)); toll.k++; toll.t = 2.1; }
+      if (toll.t <= 0 && toll.k < toll.n) { const d = Math.hypot(target.x - bellTower.x, target.z - bellTower.z); if (d < 1200) engine.bell(196, (interiors.inside ? 0.12 : 0.4) / (1 + d / 70)); toll.k++; toll.t = 3.2; }
       if (toll.k >= toll.n) toll = null;
     }
     ambient.update(dt, { day: 1 - dayNight.n, night: dayNight.n, rain: interiors.inside ? 0 : weather.cur.rain, wind: interiors.inside ? 0 : Math.max(weather.cur.snow, weather.cur.fog * 0.5), siren: police.siren, music: plaza.musicLevel, inside: !!interiors.inside });
@@ -437,10 +437,11 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
       if (bd < 32 && bellTimer <= 0 && !bellRing && engine.ctx) { bellRing = { t: 0, next: 0, k: 0 }; bellTimer = 90; }
       if (bellRing) {
         bellRing.t += dt;
-        if (bellRing.t >= bellRing.next && bellRing.k < 12) {
-          const i = bellRing.k % 2, vol = 0.35 / (1 + bd / 25);
-          engine.bell(i ? 392 : 330, vol); if (bellRing.k % 4 === 3) engine.bell(523, vol * 0.6);
-          bellRing.k++; bellRing.next += 0.85;
+        // toque a misa: una sola campana que voltea y da un golpe en cada vaivén (sin melodía)
+        if (bellRing.t >= bellRing.next && bellRing.k < 8) {
+          const vol = (bellRing.k % 2 ? 0.3 : 0.38) / (1 + bd / 25);
+          engine.bell(233, vol);
+          bellRing.k++; bellRing.next += 1.25 + Math.random() * 0.1;
         }
         bellTower.bells.forEach((b, i) => { b.rotation.x = Math.sin(bellRing.t * 3.7 + i * 1.3) * 0.9 * Math.min(1, (11 - bellRing.t) / 2); });
         if (bellRing.t > 11) { bellRing = null; bellTower.bells.forEach(b => (b.rotation.x = 0)); }
@@ -476,6 +477,11 @@ waitForMap().then(map => load(map)).then(({ data, terrain, colliders, trees, oFu
     input.driving = !!driving;
     input.endFrame();
     renderer.render(scene, camera);
+  }
+  // un fallo en un fotograma no puede parar el juego: se apunta y se sigue con el siguiente
+  let errs = 0;
+  function frame() {
+    try { step(); } catch (e) { if (errs++ < 5) console.error(e); try { input.endFrame(); } catch (_) {} }
     requestAnimationFrame(frame);
   }
   window.__game = { region, regionTraffic, plane, get flying() { return flying; }, data, outer, weather, police, shops, jobs, plaza, interiors, save, animals, player, cars, walkers, race, camera, scene, renderer, terrain, dayNight, missions, get driving() { return driving; } };

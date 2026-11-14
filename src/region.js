@@ -132,7 +132,8 @@ export class RegionTraffic {
   spawn(c, pos) {
     const net = this.area && this.net(this.area);
     if (!net || !net.roads.length) return this.sleep(c);
-    let spot = null, best = -1; const want = this.area[3] ? 80 + Math.random() * 300 : 200 + Math.random() * 700;
+    // en campo abierto todas las calles pueden quedar lejos: con -Infinity siempre se elige alguna
+    let spot = null, best = -Infinity; const want = this.area[3] ? 80 + Math.random() * 300 : 200 + Math.random() * 700;
     for (let k = 0; k < 12; k++) { // lejos del jugador, pero no tanto que no se vea nunca
       const s = net.randomSpot(), p = net.roads[s.ri].p[s.i], d = Math.hypot(p[0] - pos.x, p[1] - pos.z);
       const score = d > 70 ? 1000 - Math.abs(d - want) : d;
